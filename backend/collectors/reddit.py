@@ -33,10 +33,13 @@ async def _get_oauth_token(client: httpx.AsyncClient) -> str | None:
             auth=(client_id, client_secret),
             headers={"User-Agent": USER_AGENT},
         )
+        if resp.status_code in (401, 403):
+            logger.warning("Reddit OAuth: credenciais inválidas — usando API pública")
+            return None
         resp.raise_for_status()
         return resp.json().get("access_token")
     except Exception as exc:
-        logger.warning("Reddit OAuth: %s", exc)
+        logger.warning("Reddit OAuth: %s — usando API pública", exc)
         return None
 
 

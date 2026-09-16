@@ -7,7 +7,19 @@ import os
 import re
 from typing import Any
 
+import httpx
+
+from config import is_valid_key
+
 logger = logging.getLogger(__name__)
+
+# Desativa LLM após erro de autenticação na mesma requisição
+_llm_auth_failed = False
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(k in msg for k in ("invalid", "token", "authentication", "api key", "unauthorized", "401", "403"))
 
 BRAZILIAN_CAPITALS: dict[str, dict[str, float]] = {
     "rio branco, ac": {"lat": -9.9747, "lng": -67.8243},
@@ -99,7 +111,8 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
 async def _call_groq(text: str, author: str) -> dict[str, Any]:
     from groq import AsyncGroq
 
-    client = AsyncGroq(api_key=os.environ["GROQ_API_KEY"])
+    api_key = os.getenv("GROQ_API_KEY", "")
+    client = AsyncGroq(api_key=api_key)
     model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
     response = await client.chat.completions.create(
@@ -117,7 +130,7 @@ async def _call_groq(text: str, author: str) -> dict[str, Any]:
 async def _call_openai(text: str, author: str) -> dict[str, Any]:
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     response = await client.chat.completions.create(
@@ -159,33 +172,53 @@ def _rule_based_fallback(text: str) -> dict[str, Any]:
 
 async def analyze_text(text: str, author: str = "") -> dict[str, Any]:
     """Classifica sentimento e infere localização de um texto."""
-    if is_valid_key(os.getenv("GROQ_API_KEY")):
+    global _llm_auth_failed
+
+    if not _llm_auth_failed and is_valid_key(os.getenv("GROQ_API_KEY")):
         try:
             return await _call_groq(text, author)
         except Exception as exc:
-            logger.warning("Groq falhou: %s", exc)
+            if _is_auth_error(exc):
+                _llm_auth_failed = True
+                logger.error("Groq: chave inválida — usando fallback heurístico. Corrija GROQ_API_KEY no .env")
+            else:
+                logger.warning("Groq falhou: %s", exc)
 
-    if is_valid_key(os.getenv("OPENAI_API_KEY")):
+    if not _llm_auth_failed and is_valid_key(os.getenv("OPENAI_API_KEY")):
         try:
             return await _call_openai(text, author)
         except Exception as exc:
-            logger.warning("OpenAI falhou: %s", exc)
+            if _is_auth_error(exc):
+                _llm_auth_failed = True
+                logger.error("OpenAI: chave inválida — usando fallback heurístico")
+            else:
+                logger.warning("OpenAI falhou: %s", exc)
 
     return _rule_based_fallback(text)
 
 
-async def analyze_items(items: list[dict[str, Any]], concurrency: int = 8, max_items: int = 40) -> list[dict[str, Any]]:
-    """Processa lista de menções e retorna pontos para o mapa de calor."""
+async def analyze_items(
+    items: list[dict[str, Any]], concurrency: int = 8, max_items: int = 40
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Processa menções e retorna (pontos, avisos)."""
+    global _llm_auth_failed
+    _llm_auth_failed = False
+
     semaphore = asyncio.Semaphore(concurrency)
     points: list[dict[str, Any]] = []
+    warnings: list[str] = []
 
     async def _process(item: dict[str, Any]) -> dict[str, Any] | None:
         text = item.get("text", "").strip()
         if not text:
             return None
 
-        async with semaphore:
-            analysis = await analyze_text(text, item.get("author", ""))
+        try:
+            async with semaphore:
+                analysis = await analyze_text(text, item.get("author", ""))
+        except Exception as exc:
+            logger.warning("Erro ao analisar item, usando fallback: %s", exc)
+            analysis = _rule_based_fallback(text)
 
         source = item.get("source", "unknown")
         default_labels = {
@@ -210,9 +243,23 @@ async def analyze_items(items: list[dict[str, Any]], concurrency: int = 8, max_i
             "created_at": item.get("created_at", ""),
         }
 
-    results = await asyncio.gather(*[_process(i) for i in items[:max_items]])
-    points.extend(r for r in results if r)
-    return points
+    results = await asyncio.gather(
+        *[_process(i) for i in items[:max_items]], return_exceptions=True
+    )
+    for r in results:
+        if isinstance(r, Exception):
+            logger.error("Falha ao processar item: %s", r)
+            continue
+        if r:
+            points.append(r)
+
+    if _llm_auth_failed:
+        warnings.append(
+            "Chave Groq/OpenAI inválida — sentimento usando fallback básico. "
+            "Corrija GROQ_API_KEY em backend/.env (https://console.groq.com)"
+        )
+
+    return points, warnings
 
 
 def build_summary(points: list[dict[str, Any]]) -> dict[str, Any]:

@@ -271,6 +271,14 @@
         allPoints = body.points || [];
         activeSources = new Set(sources.split(',').filter(Boolean));
         updateUI(body.collection);
+
+        if (body.warnings?.length) {
+          const t = document.getElementById('errorToast');
+          t.className = 'fixed bottom-6 right-6 max-w-md bg-amber-900/90 border border-amber-600 text-amber-100 px-4 py-3 rounded-lg shadow-lg z-50 text-sm';
+          t.textContent = body.warnings.join(' ');
+          t.classList.remove('hidden');
+          setTimeout(() => { t.classList.add('hidden'); t.className = 'hidden fixed bottom-6 right-6 max-w-sm bg-red-900/90 border border-red-700 text-red-100 px-4 py-3 rounded-lg shadow-lg z-50 text-sm'; }, 10000);
+        }
       } catch (e) {
         document.getElementById('errorToast').textContent = e.message;
         document.getElementById('errorToast').classList.remove('hidden');
