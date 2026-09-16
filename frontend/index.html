@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mapa de Calor — Sentimentos YouTube</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <style>
+    #map { height: calc(100vh - 180px); min-height: 400px; z-index: 0; }
+    .leaflet-container { font-family: inherit; }
+    .gradient-green { background: linear-gradient(90deg, #14532d, #22c55e, #bbf7d0); }
+    .gradient-red { background: linear-gradient(90deg, #7f1d1d, #ef4444, #fecaca); }
+    .gradient-blue { background: linear-gradient(90deg, #1e3a5f, #3b82f6, #bfdbfe); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+      <div class="flex-1">
+        <h1 class="text-xl font-bold tracking-tight">Mapa de Calor — Sentimentos</h1>
+        <p class="text-sm text-slate-400">Monitoramento geográfico de comentários do YouTube</p>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <input
+          id="searchInput"
+          type="text"
+          value="Pablo Marçal"
+          placeholder="Palavra-chave..."
+          class="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none text-sm w-full sm:w-64"
+        />
+        <button
+          id="updateBtn"
+          class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          <span id="btnText">Atualizar Mapa</span>
+          <svg id="btnSpinner" class="hidden animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Controls -->
+  <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+    <div class="flex flex-wrap gap-2" id="modeSelector">
+      <button data-mode="density" class="mode-btn active px-4 py-1.5 rounded-full text-sm font-medium border border-blue-500 bg-blue-600/20 text-blue-300">
+        Densidade Geral
+      </button>
+      <button data-mode="positive" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-green-500 hover:text-green-300">
+        Calor Positivo
+      </button>
+      <button data-mode="negative" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-red-500 hover:text-red-300">
+        Calor Negativo
+      </button>
+    </div>
+    <div id="stats" class="text-sm text-slate-400 flex gap-4">
+      <span id="statTotal">0 comentários</span>
+      <span id="statPositive" class="text-green-400">0 positivos</span>
+      <span id="statNegative" class="text-red-400">0 negativos</span>
+      <span id="statNeutral" class="text-slate-500">0 neutros</span>
+    </div>
+  </div>
+
+  <!-- Gradient legend -->
+  <div class="max-w-7xl mx-auto px-4 pb-2">
+    <div id="legendBar" class="h-2 rounded-full gradient-blue w-full max-w-xs"></div>
+    <p id="legendLabel" class="text-xs text-slate-500 mt-1">Intensidade por volume de comentários</p>
+  </div>
+
+  <!-- Map -->
+  <div class="max-w-7xl mx-auto px-4 pb-4">
+    <div id="map" class="rounded-xl overflow-hidden border border-slate-800 shadow-2xl"></div>
+  </div>
+
+  <!-- Error toast -->
+  <div id="errorToast" class="hidden fixed bottom-6 right-6 max-w-sm bg-red-900/90 border border-red-700 text-red-100 px-4 py-3 rounded-lg shadow-lg z-50 text-sm"></div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    const BRAZIL_CENTER = [-14.2350, -51.9253];
+    const BRAZIL_ZOOM = 4;
+
+    let map, heatLayer;
+    let rawData = [];
+    let currentMode = 'density';
+
+    const GRADIENTS = {
+      density: { 0.2: '#1e40af', 0.5: '#3b82f6', 0.8: '#93c5fd', 1.0: '#dbeafe' },
+      positive: { 0.2: '#14532d', 0.5: '#22c55e', 0.8: '#86efac', 1.0: '#dcfce7' },
+      negative: { 0.2: '#7f1d1d', 0.5: '#ef4444', 0.8: '#fca5a5', 1.0: '#fee2e2' },
+    };
+
+    function initMap() {
+      map = L.map('map').setView(BRAZIL_CENTER, BRAZIL_ZOOM);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 18,
+      }).addTo(map);
+    }
+
+    function computeHeatPoints(data, mode) {
+      if (mode === 'density') {
+        const locationCounts = {};
+        data.forEach(p => {
+          const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+          locationCounts[key] = (locationCounts[key] || 0) + 1;
+        });
+        const maxCount = Math.max(...Object.values(locationCounts), 1);
+
+        return data.map(p => {
+          const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+          const intensity = locationCounts[key] / maxCount;
+          return [p.lat, p.lng, Math.max(0.15, intensity)];
+        });
+      }
+
+      if (mode === 'positive') {
+        return data
+          .filter(p => p.sentiment === 'positivo' || p.sentiment_score > 0)
+          .map(p => [p.lat, p.lng, Math.max(0.2, (p.sentiment_score + 1) / 2)]);
+      }
+
+      return data
+        .filter(p => p.sentiment === 'negativo' || p.sentiment_score < 0)
+        .map(p => [p.lat, p.lng, Math.max(0.2, (Math.abs(p.sentiment_score) + 1) / 2)]);
+    }
+
+    function renderHeatmap(data, mode) {
+      if (heatLayer) {
+        map.removeLayer(heatLayer);
+      }
+
+      const points = computeHeatPoints(data, mode);
+      if (points.length === 0) {
+        return;
+      }
+
+      heatLayer = L.heatLayer(points, {
+        radius: 30,
+        blur: 20,
+        maxZoom: 12,
+        max: 1.0,
+        gradient: GRADIENTS[mode],
+      }).addTo(map);
+    }
+
+    function updateStats(data) {
+      const total = data.length;
+      const positive = data.filter(p => p.sentiment === 'positivo').length;
+      const negative = data.filter(p => p.sentiment === 'negativo').length;
+      const neutral = total - positive - negative;
+
+      document.getElementById('statTotal').textContent = `${total} comentários`;
+      document.getElementById('statPositive').textContent = `${positive} positivos`;
+      document.getElementById('statNegative').textContent = `${negative} negativos`;
+      document.getElementById('statNeutral').textContent = `${neutral} neutros`;
+    }
+
+    function updateLegend(mode) {
+      const bar = document.getElementById('legendBar');
+      const label = document.getElementById('legendLabel');
+      bar.className = 'h-2 rounded-full w-full max-w-xs';
+
+      if (mode === 'positive') {
+        bar.classList.add('gradient-green');
+        label.textContent = 'Intensidade de sentimento positivo';
+      } else if (mode === 'negative') {
+        bar.classList.add('gradient-red');
+        label.textContent = 'Intensidade de sentimento negativo';
+      } else {
+        bar.classList.add('gradient-blue');
+        label.textContent = 'Intensidade por volume de comentários';
+      }
+    }
+
+    function setLoading(loading) {
+      const btn = document.getElementById('updateBtn');
+      const spinner = document.getElementById('btnSpinner');
+      const text = document.getElementById('btnText');
+      btn.disabled = loading;
+      spinner.classList.toggle('hidden', !loading);
+      text.textContent = loading ? 'Carregando...' : 'Atualizar Mapa';
+    }
+
+    function showError(message) {
+      const toast = document.getElementById('errorToast');
+      toast.textContent = message;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 6000);
+    }
+
+    async function fetchHeatmapData(query) {
+      setLoading(true);
+      try {
+        const url = `${API_BASE}/api/heatmap-data?query=${encodeURIComponent(query)}`;
+        const res = await fetch(url);
+        const body = await res.json();
+
+        if (!res.ok) {
+          const detail = body.detail || 'Erro desconhecido';
+          throw new Error(detail);
+        }
+
+        rawData = body;
+        updateStats(rawData);
+        renderHeatmap(rawData, currentMode);
+      } catch (err) {
+        showError(err.message || 'Falha ao carregar dados');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(btn => {
+        const isActive = btn.dataset.mode === mode;
+        btn.classList.toggle('active', isActive);
+        btn.classList.toggle('border-blue-500', isActive && mode === 'density');
+        btn.classList.toggle('bg-blue-600/20', isActive && mode === 'density');
+        btn.classList.toggle('text-blue-300', isActive && mode === 'density');
+        btn.classList.toggle('border-green-500', isActive && mode === 'positive');
+        btn.classList.toggle('bg-green-600/20', isActive && mode === 'positive');
+        btn.classList.toggle('text-green-300', isActive && mode === 'positive');
+        btn.classList.toggle('border-red-500', isActive && mode === 'negative');
+        btn.classList.toggle('bg-red-600/20', isActive && mode === 'negative');
+        btn.classList.toggle('text-red-300', isActive && mode === 'negative');
+        if (!isActive) {
+          btn.classList.add('border-slate-700', 'text-slate-400');
+        }
+      });
+      updateLegend(mode);
+      renderHeatmap(rawData, currentMode);
+    }
+
+    document.getElementById('modeSelector').addEventListener('click', e => {
+      const btn = e.target.closest('.mode-btn');
+      if (btn) setMode(btn.dataset.mode);
+    });
+
+    document.getElementById('updateBtn').addEventListener('click', () => {
+      const query = document.getElementById('searchInput').value.trim();
+      if (query) fetchHeatmapData(query);
+    });
+
+    document.getElementById('searchInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const query = e.target.value.trim();
+        if (query) fetchHeatmapData(query);
+      }
+    });
+
+    initMap();
+    fetchHeatmapData('Pablo Marçal');
+  </script>
+</body>
+</html>
