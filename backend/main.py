@@ -1,4 +1,4 @@
-"""Servidor FastAPI — API multi-fonte de mapa de calor de sentimentos."""
+"""Servidor FastAPI — monitoramento de menções com mapa de calor por sentimento."""
 
 import logging
 import os
@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from analyzer import analyze_items, build_summary
-from collector import AVAILABLE_SOURCES, collect_all
+from collectors import AVAILABLE_SOURCES, collect_all
 
 load_dotenv()
 
@@ -22,9 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Mapa de Calor — Sentimentos Multi-Fonte",
-    description="Coleta menções do YouTube, Bluesky, Reddit e RSS; analisa sentimento e geolocalização.",
-    version="2.0.0",
+    title="Mapa de Calor — Menções na Web",
+    description="Coleta menções do YouTube e Bluesky, classifica sentimento e plota no mapa.",
+    version="1.0.0",
 )
 
 app.add_middleware(
@@ -44,44 +44,24 @@ def health_check():
         "status": "ok",
         "sources": {
             "youtube": bool(os.getenv("YOUTUBE_API_KEY")),
-            "bluesky": True,  # API pública; credenciais opcionais
-            "reddit": bool(os.getenv("REDDIT_CLIENT_ID") and os.getenv("REDDIT_CLIENT_SECRET")),
-            "news": True,  # RSS público, sem chave
+            "bluesky": True,
         },
         "llm": {
             "groq": bool(os.getenv("GROQ_API_KEY")),
-            "huggingface": bool(os.getenv("HUGGINGFACE_API_KEY")),
+            "openai": bool(os.getenv("OPENAI_API_KEY")),
             "fallback": "rule_based",
         },
-    }
-
-
-@app.get("/api/sources")
-def list_sources():
-    return {
-        "sources": [
-            {"id": "youtube", "label": "YouTube", "requires_key": True},
-            {"id": "bluesky", "label": "Bluesky", "requires_key": False},
-            {"id": "reddit", "label": "Reddit", "requires_key": True},
-            {"id": "news", "label": "Notícias (RSS)", "requires_key": False},
-        ]
     }
 
 
 @app.get("/api/heatmap-data")
 async def get_heatmap_data(
     query: str = Query(..., min_length=1, description="Palavra-chave de busca"),
-    sources: str = Query(
-        "youtube,bluesky,reddit,news",
-        description="Fontes separadas por vírgula",
-    ),
+    sources: str = Query("youtube,bluesky", description="Fontes: youtube,bluesky"),
     max_videos: int = Query(5, ge=1, le=10),
-    max_comments: int = Query(15, ge=1, le=50),
+    max_comments: int = Query(20, ge=1, le=50),
 ):
-    """
-    Coleta menções de múltiplas fontes em paralelo, analisa sentimento
-    e retorna pontos + resumo com percentuais.
-    """
+    """Coleta menções em paralelo, analisa sentimento e retorna pontos + resumo."""
     source_list = [s.strip() for s in sources.split(",") if s.strip()]
     invalid = [s for s in source_list if s not in AVAILABLE_SOURCES]
     if invalid:
@@ -101,9 +81,7 @@ async def get_heatmap_data(
         return {"points": [], "summary": build_summary([])}
 
     points = await analyze_items(items)
-    summary = build_summary(points)
-
-    return {"points": points, "summary": summary}
+    return {"points": points, "summary": build_summary(points)}
 
 
 @app.get("/")

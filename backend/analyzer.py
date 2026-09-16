@@ -1,4 +1,4 @@
-"""Análise de sentimento e geolocalização via Groq / Hugging Face."""
+"""Classificação de sentimento e inferência de coordenadas via Groq / OpenAI."""
 
 import asyncio
 import json
@@ -7,11 +7,9 @@ import os
 import re
 from typing import Any
 
-import httpx
-
 logger = logging.getLogger(__name__)
 
-BRAZILIAN_CAPITALS: dict[str, dict[str, Any]] = {
+BRAZILIAN_CAPITALS: dict[str, dict[str, float]] = {
     "rio branco, ac": {"lat": -9.9747, "lng": -67.8243},
     "maceió, al": {"lat": -9.6658, "lng": -35.735},
     "macapá, ap": {"lat": 0.0349, "lng": -51.0694},
@@ -41,63 +39,40 @@ BRAZILIAN_CAPITALS: dict[str, dict[str, Any]] = {
     "palmas, to": {"lat": -10.184, "lng": -48.3336},
 }
 
-DEFAULT_LOCATION = {
-    "detected_city_uf": "Brasil",
-    "detected_location": "Brasil",
-    "lat": -14.235,
-    "lng": -51.9253,
-}
+DEFAULT_LOCATION = {"detected_city_uf": "Brasil", "lat": -14.235, "lng": -51.9253}
 
-SYSTEM_PROMPT = """Você analisa textos brasileiros de redes sociais e notícias.
+SYSTEM_PROMPT = """Você analisa textos brasileiros de redes sociais.
 Retorne APENAS JSON válido (sem markdown) com:
 - sentiment_score: float de -1.0 (muito negativo) a 1.0 (muito positivo)
 - sentiment_label: "positivo", "neutro" ou "negativo"
-- detected_city_uf: cidade e UF inferidos (ex: "São Paulo, SP"). Use "Brasil" se não houver indício.
-- lat: latitude float da cidade
-- lng: longitude float da cidade
+- detected_city_uf: cidade e UF inferidos (ex: "Curitiba, PR"). Use "Brasil" se não houver indício.
+- lat: latitude float
+- lng: longitude float
 
 Considere gírias, ironia e contexto político brasileiro."""
 
 
-class AnalyzerError(Exception):
-    pass
-
-
-def _normalize_location_key(location: str) -> str:
-    return re.sub(r"\s+", " ", location.strip().lower())
-
-
 def resolve_coordinates(
-    location: str | None, lat: float | None, lng: float | None
+    city_uf: str | None, lat: float | None, lng: float | None
 ) -> dict[str, Any]:
+    """Fallback em capitais brasileiras quando coordenadas são inválidas."""
     if lat is not None and lng is not None and -35 <= lat <= 6 and -75 <= lng <= -30:
-        city_uf = location or DEFAULT_LOCATION["detected_city_uf"]
-        return {"detected_city_uf": city_uf, "detected_location": city_uf, "lat": lat, "lng": lng}
+        return {"detected_city_uf": city_uf or "Brasil", "lat": lat, "lng": lng}
 
-    if location:
-        key = _normalize_location_key(location)
+    if city_uf:
+        key = re.sub(r"\s+", " ", city_uf.strip().lower())
         if key in BRAZILIAN_CAPITALS:
-            coords = BRAZILIAN_CAPITALS[key]
-            return {
-                "detected_city_uf": location,
-                "detected_location": location,
-                "lat": coords["lat"],
-                "lng": coords["lng"],
-            }
+            c = BRAZILIAN_CAPITALS[key]
+            return {"detected_city_uf": city_uf, "lat": c["lat"], "lng": c["lng"]}
         for capital_key, coords in BRAZILIAN_CAPITALS.items():
             city = capital_key.split(",")[0]
-            if city in key or key.split(",")[0] in capital_key:
-                return {
-                    "detected_city_uf": location,
-                    "detected_location": location,
-                    "lat": coords["lat"],
-                    "lng": coords["lng"],
-                }
+            if city in key:
+                return {"detected_city_uf": city_uf, "lat": coords["lat"], "lng": coords["lng"]}
 
     return DEFAULT_LOCATION.copy()
 
 
-def _parse_llm_response(raw: str) -> dict[str, Any]:
+def _parse_llm_json(raw: str) -> dict[str, Any]:
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -110,82 +85,60 @@ def _parse_llm_response(raw: str) -> dict[str, Any]:
     if label not in ("positivo", "neutro", "negativo"):
         label = "positivo" if score > 0.15 else "negativo" if score < -0.15 else "neutro"
 
-    city_uf = data.get("detected_city_uf") or data.get("detected_location")
+    city_uf = data.get("detected_city_uf", "Brasil")
     try:
-        lat_f = float(data["lat"]) if data.get("lat") is not None else None
-        lng_f = float(data["lng"]) if data.get("lng") is not None else None
+        lat = float(data["lat"]) if data.get("lat") is not None else None
+        lng = float(data["lng"]) if data.get("lng") is not None else None
     except (TypeError, ValueError):
-        lat_f, lng_f = None, None
+        lat, lng = None, None
 
-    coords = resolve_coordinates(city_uf, lat_f, lng_f)
+    coords = resolve_coordinates(city_uf, lat, lng)
     return {"sentiment_score": score, "sentiment_label": label, **coords}
 
 
-async def _analyze_groq(text: str, author: str, location_hint: str) -> dict[str, Any]:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise AnalyzerError("GROQ_API_KEY não configurada")
+async def _call_groq(text: str, author: str) -> dict[str, Any]:
+    from groq import AsyncGroq
 
+    client = AsyncGroq(api_key=os.environ["GROQ_API_KEY"])
     model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-    user_content = f"Autor: {author}\nLocalização conhecida: {location_hint or 'desconhecida'}\nTexto: {text}"
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                "temperature": 0.2,
-                "max_tokens": 200,
-            },
-        )
-        if resp.status_code != 200:
-            raise AnalyzerError(f"Groq HTTP {resp.status_code}: {resp.text[:200]}")
-
-        raw = resp.json()["choices"][0]["message"]["content"]
-        return _parse_llm_response(raw)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Autor: {author}\nTexto: {text}"},
+        ],
+        temperature=0.2,
+        max_tokens=200,
+    )
+    return _parse_llm_json(response.choices[0].message.content or "")
 
 
-async def _analyze_huggingface(text: str, author: str, location_hint: str) -> dict[str, Any]:
-    api_key = os.getenv("HUGGINGFACE_API_KEY")
-    if not api_key:
-        raise AnalyzerError("HUGGINGFACE_API_KEY não configurada")
+async def _call_openai(text: str, author: str) -> dict[str, Any]:
+    from openai import AsyncOpenAI
 
-    model = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
-    user_content = f"{SYSTEM_PROMPT}\n\nAutor: {author}\nLocal: {location_hint or 'desconhecida'}\nTexto: {text}"
+    client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    async with httpx.AsyncClient(timeout=45) as client:
-        resp = await client.post(
-            f"https://api-inference.huggingface.co/models/{model}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "inputs": user_content,
-                "parameters": {"max_new_tokens": 200, "temperature": 0.2, "return_full_text": False},
-            },
-        )
-        if resp.status_code != 200:
-            raise AnalyzerError(f"HuggingFace HTTP {resp.status_code}: {resp.text[:200]}")
-
-        result = resp.json()
-        if isinstance(result, list):
-            raw = result[0].get("generated_text", "")
-        else:
-            raw = result.get("generated_text", str(result))
-
-        return _parse_llm_response(raw)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Autor: {author}\nTexto: {text}"},
+        ],
+        temperature=0.2,
+        max_tokens=200,
+    )
+    return _parse_llm_json(response.choices[0].message.content or "")
 
 
-def _rule_based_fallback(text: str, location_hint: str = "") -> dict[str, Any]:
+def _rule_based_fallback(text: str) -> dict[str, Any]:
     lower = text.lower()
-    positive = {"amo", "top", "incrível", "melhor", "parabéns", "genial", "excelente", "adorei", "apoio"}
-    negative = {"ódio", "pior", "horrível", "lixo", "vergonha", "ridículo", "mentiroso", "fraco", "condeno"}
+    pos_words = {"amo", "top", "incrível", "melhor", "parabéns", "excelente", "adorei"}
+    neg_words = {"ódio", "pior", "horrível", "lixo", "vergonha", "ridículo", "mentiroso"}
 
-    pos = sum(1 for w in positive if w in lower)
-    neg = sum(1 for w in negative if w in lower)
+    pos = sum(1 for w in pos_words if w in lower)
+    neg = sum(1 for w in neg_words if w in lower)
 
     if pos > neg:
         score, label = 0.6, "positivo"
@@ -194,85 +147,76 @@ def _rule_based_fallback(text: str, location_hint: str = "") -> dict[str, Any]:
     else:
         score, label = 0.0, "neutro"
 
-    location = location_hint or None
-    if not location:
-        for capital_key in BRAZILIAN_CAPITALS:
-            city = capital_key.split(",")[0]
-            if city in lower:
-                location = capital_key.title()
-                break
+    city_uf = None
+    for capital_key in BRAZILIAN_CAPITALS:
+        if capital_key.split(",")[0] in lower:
+            city_uf = capital_key.title()
+            break
 
-    coords = resolve_coordinates(location, None, None)
+    coords = resolve_coordinates(city_uf, None, None)
     return {"sentiment_score": score, "sentiment_label": label, **coords}
 
 
-async def analyze_item(item: dict[str, Any]) -> dict[str, Any]:
-    """Analisa um item coletado e retorna ponto para o mapa."""
-    text = item.get("text", "").strip()
-    if not text:
-        return {}
-
-    author = item.get("author", "")
-    location_hint = item.get("author_location_raw", "")
-
-    analysis = None
+async def analyze_text(text: str, author: str = "") -> dict[str, Any]:
+    """Classifica sentimento e infere localização de um texto."""
     if os.getenv("GROQ_API_KEY"):
         try:
-            analysis = await _analyze_groq(text, author, location_hint)
+            return await _call_groq(text, author)
         except Exception as exc:
-            logger.warning("Groq falhou, tentando HuggingFace: %s", exc)
+            logger.warning("Groq falhou: %s", exc)
 
-    if analysis is None and os.getenv("HUGGINGFACE_API_KEY"):
+    if os.getenv("OPENAI_API_KEY"):
         try:
-            analysis = await _analyze_huggingface(text, author, location_hint)
+            return await _call_openai(text, author)
         except Exception as exc:
-            logger.warning("HuggingFace falhou, usando fallback: %s", exc)
+            logger.warning("OpenAI falhou: %s", exc)
 
-    if analysis is None:
-        analysis = _rule_based_fallback(text, location_hint)
-
-    return {
-        "lat": analysis["lat"],
-        "lng": analysis["lng"],
-        "intensity": abs(analysis["sentiment_score"]) if analysis["sentiment_score"] != 0 else 0.3,
-        "sentiment": analysis["sentiment_label"],
-        "sentiment_score": analysis["sentiment_score"],
-        "location": analysis.get("detected_city_uf", "Brasil"),
-        "text": text[:300],
-        "author": author,
-        "source": item.get("source", "unknown"),
-        "source_label": item.get("source_label", item.get("source", "")),
-        "source_url": item.get("source_url", ""),
-        "context_title": item.get("context_title", ""),
-    }
+    return _rule_based_fallback(text)
 
 
 async def analyze_items(items: list[dict[str, Any]], concurrency: int = 5) -> list[dict[str, Any]]:
-    """Analisa múltiplos itens com limite de concorrência."""
+    """Processa lista de menções e retorna pontos para o mapa de calor."""
     semaphore = asyncio.Semaphore(concurrency)
-    results: list[dict[str, Any]] = []
+    points: list[dict[str, Any]] = []
 
-    async def _process(item: dict[str, Any]) -> dict[str, Any]:
+    async def _process(item: dict[str, Any]) -> dict[str, Any] | None:
+        text = item.get("text", "").strip()
+        if not text:
+            return None
+
         async with semaphore:
-            return await analyze_item(item)
+            analysis = await analyze_text(text, item.get("author", ""))
 
-    tasks = [_process(item) for item in items]
-    processed = await asyncio.gather(*tasks)
+        source = item.get("source", "unknown")
+        source_labels = {"youtube": "YouTube", "bluesky": "Bluesky"}
 
-    for point in processed:
-        if point:
-            results.append(point)
+        return {
+            "lat": analysis["lat"],
+            "lng": analysis["lng"],
+            "intensity": abs(analysis["sentiment_score"]) if analysis["sentiment_score"] else 0.3,
+            "sentiment": analysis["sentiment_label"],
+            "sentiment_score": analysis["sentiment_score"],
+            "detected_city_uf": analysis["detected_city_uf"],
+            "text": text[:300],
+            "author": item.get("author", ""),
+            "source": source,
+            "source_label": source_labels.get(source, source),
+            "source_url": item.get("source_url", ""),
+            "created_at": item.get("created_at", ""),
+        }
 
-    return results
+    results = await asyncio.gather(*[_process(i) for i in items])
+    points.extend(r for r in results if r)
+    return points
 
 
 def build_summary(points: list[dict[str, Any]]) -> dict[str, Any]:
-    """Gera resumo com percentuais de sentimento e contagem por fonte."""
+    """Calcula percentuais de sentimento e breakdown por fonte."""
     total = len(points)
     if total == 0:
         return {
             "total": 0,
-            "sentiment_percentages": {"positivo": 0, "neutro": 0, "negativo": 0},
+            "sentiment_percentages": {"positivo": 0.0, "neutro": 0.0, "negativo": 0.0},
             "by_source": {},
         }
 
@@ -293,21 +237,16 @@ def build_summary(points: list[dict[str, Any]]) -> dict[str, Any]:
                 "negativo": 0,
             }
         by_source[src]["count"] += 1
-        by_source[src][sentiment] = by_source[src].get(sentiment, 0) + 1
+        by_source[src][sentiment] += 1
 
     percentages = {k: round(v / total * 100, 1) for k, v in counts.items()}
 
-    for src_data in by_source.values():
-        src_total = src_data["count"]
-        if src_total > 0:
-            src_data["percentages"] = {
-                "positivo": round(src_data["positivo"] / src_total * 100, 1),
-                "neutro": round(src_data["neutro"] / src_total * 100, 1),
-                "negativo": round(src_data["negativo"] / src_total * 100, 1),
-            }
+    for data in by_source.values():
+        n = data["count"]
+        data["percentages"] = {
+            "positivo": round(data["positivo"] / n * 100, 1),
+            "neutro": round(data["neutro"] / n * 100, 1),
+            "negativo": round(data["negativo"] / n * 100, 1),
+        }
 
-    return {
-        "total": total,
-        "sentiment_percentages": percentages,
-        "by_source": by_source,
-    }
+    return {"total": total, "sentiment_percentages": percentages, "by_source": by_source}

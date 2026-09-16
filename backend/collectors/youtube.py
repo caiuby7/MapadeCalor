@@ -1,4 +1,4 @@
-"""Coleta de comentários do YouTube via Data API v3."""
+"""Coletor YouTube via Data API v3."""
 
 import asyncio
 import logging
@@ -11,7 +11,7 @@ from googleapiclient.errors import HttpError
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_VIDEOS = 5
-DEFAULT_MAX_COMMENTS_PER_VIDEO = 15
+DEFAULT_MAX_COMMENTS = 20
 
 
 def _build_client():
@@ -24,13 +24,13 @@ def _build_client():
 def _collect_sync(query: str, max_videos: int, max_comments: int) -> list[dict[str, Any]]:
     youtube = _build_client()
     if not youtube:
-        logger.warning("YouTube: YOUTUBE_API_KEY não configurada")
+        logger.warning("YouTube: YOUTUBE_API_KEY não configurada — retornando lista vazia")
         return []
 
     items: list[dict[str, Any]] = []
 
     try:
-        search = (
+        search_response = (
             youtube.search()
             .list(
                 part="snippet",
@@ -47,12 +47,11 @@ def _collect_sync(query: str, max_videos: int, max_comments: int) -> list[dict[s
         logger.error("YouTube: erro na busca — %s", exc.reason)
         return []
 
-    for video in search.get("items", []):
+    for video in search_response.get("items", []):
         video_id = video["id"]["videoId"]
-        video_title = video["snippet"].get("title", "")
 
         try:
-            threads = (
+            threads_response = (
                 youtube.commentThreads()
                 .list(
                     part="snippet",
@@ -68,7 +67,7 @@ def _collect_sync(query: str, max_videos: int, max_comments: int) -> list[dict[s
                 logger.warning("YouTube: erro nos comentários de %s — %s", video_id, exc.reason)
             continue
 
-        for thread in threads.get("items", []):
+        for thread in threads_response.get("items", []):
             snippet = thread["snippet"]["topLevelComment"]["snippet"]
             text = snippet.get("textDisplay", "").strip()
             if not text:
@@ -77,23 +76,20 @@ def _collect_sync(query: str, max_videos: int, max_comments: int) -> list[dict[s
             items.append(
                 {
                     "source": "youtube",
-                    "source_label": "YouTube",
-                    "source_url": f"https://www.youtube.com/watch?v={video_id}",
                     "text": text,
                     "author": snippet.get("authorDisplayName", ""),
-                    "author_location_raw": "",
-                    "published_at": snippet.get("publishedAt", ""),
-                    "context_title": video_title,
+                    "created_at": snippet.get("publishedAt", ""),
+                    "source_url": f"https://www.youtube.com/watch?v={video_id}",
                 }
             )
 
-    logger.info("YouTube: %d menções para '%s'", len(items), query)
+    logger.info("YouTube: %d menções coletadas para '%s'", len(items), query)
     return items
 
 
 async def collect_youtube(
     query: str,
     max_videos: int = DEFAULT_MAX_VIDEOS,
-    max_comments: int = DEFAULT_MAX_COMMENTS_PER_VIDEO,
+    max_comments: int = DEFAULT_MAX_COMMENTS,
 ) -> list[dict[str, Any]]:
     return await asyncio.to_thread(_collect_sync, query, max_videos, max_comments)

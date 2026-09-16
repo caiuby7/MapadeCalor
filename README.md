@@ -1,47 +1,32 @@
-# Mapa de Calor — Monitoramento de Sentimentos Multi-Fonte
+# Mapa de Calor — Monitoramento de Menções na Web
 
-MVP full stack que coleta menções de **YouTube**, **Bluesky**, **Reddit** e **feeds RSS de notícias**, analisa sentimento e geolocalização via LLM gratuita (Groq / Hugging Face) e visualiza em mapa de calor interativo.
+MVP full stack para coletar menções do **YouTube** e **Bluesky**, classificar sentimento via LLM (Groq/OpenAI) e visualizar em mapa de calor geográfico.
 
-## Arquitetura
+## Estrutura
 
 ```
 ├── backend/
-│   ├── main.py              # FastAPI — rotas e CORS
-│   ├── collector.py         # Orquestrador async (asyncio.gather)
-│   ├── analyzer.py          # Sentimento + geolocalização (Groq/HF)
-│   ├── sources/
-│   │   ├── youtube.py       # YouTube Data API v3
-│   │   ├── bluesky.py       # AT Protocol (searchPosts)
-│   │   ├── reddit.py        # Reddit REST API
-│   │   └── news.py          # RSS via feedparser
+│   ├── main.py
+│   ├── collectors/
+│   │   ├── __init__.py      # Orquestrador async (asyncio.gather)
+│   │   ├── bluesky.py       # AT Protocol API pública
+│   │   └── youtube.py       # YouTube Data API v3
+│   ├── analyzer.py          # Sentimento + geolocalização (Groq/OpenAI)
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
-    └── index.html           # Leaflet + leaflet-heat + filtros
+    └── index.html           # Leaflet + leaflet-heat
 ```
 
-## Fontes de dados
-
-| Fonte | API | Chave necessária? | Plano |
-|-------|-----|-------------------|-------|
-| YouTube | Data API v3 | Sim (`YOUTUBE_API_KEY`) | Gratuito (cota diária) |
-| Bluesky | AT Protocol público | Não (credenciais opcionais) | Gratuito |
-| Reddit | OAuth REST | Sim (`CLIENT_ID` + `SECRET`) | Gratuito |
-| Notícias RSS | feedparser | Não | Gratuito |
-
-## Formato padronizado de coleta
-
-Cada fonte retorna:
+## Schema unificado de coleta
 
 ```json
 {
-  "source": "youtube|bluesky|reddit|news",
-  "source_label": "YouTube",
-  "source_url": "https://...",
-  "text": "...",
-  "author": "...",
-  "author_location_raw": "...",
-  "context_title": "..."
+  "source": "bluesky",
+  "text": "Texto da menção",
+  "author": "Nome do autor",
+  "created_at": "2026-01-01T12:00:00.000Z",
+  "source_url": "https://..."
 }
 ```
 
@@ -49,30 +34,22 @@ Cada fonte retorna:
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edite .env com suas chaves
 ```
 
-### Chaves necessárias
+| Variável | Obrigatória | Descrição |
+|----------|-------------|-----------|
+| `YOUTUBE_API_KEY` | Não* | Google Cloud Console — sem chave, YouTube retorna vazio |
+| `GROQ_API_KEY` | Não* | [console.groq.com](https://console.groq.com) — recomendado |
+| `OPENAI_API_KEY` | Não* | Alternativa à Groq |
 
-| Variável | Onde obter |
-|----------|-----------|
-| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com) |
-| `REDDIT_CLIENT_ID/SECRET` | [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (tipo "script") |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) (gratuito, Llama 3) |
-| `HUGGINGFACE_API_KEY` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `BLUESKY_HANDLE/PASSWORD` | Opcional — busca pública funciona sem |
-
-> Sem chave LLM, o sistema usa fallback heurístico. Fontes sem chave são ignoradas silenciosamente.
+\* Pelo menos uma chave LLM é recomendada; sem ela, usa fallback heurístico.
 
 ## Execução
 
 ```bash
-cd backend
-source .venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -80,47 +57,32 @@ Abra **http://localhost:8000**
 
 ## API
 
-### `GET /api/heatmap-data?query={termo}&sources=youtube,bluesky,reddit,news`
-
-Coleta em paralelo, analisa e retorna:
+### `GET /api/heatmap-data?query={termo}&sources=youtube,bluesky`
 
 ```json
 {
-  "points": [
-    {
-      "lat": -23.5505,
-      "lng": -46.6333,
-      "intensity": 0.8,
-      "sentiment": "positivo",
-      "sentiment_score": 0.75,
-      "source": "youtube",
-      "source_label": "YouTube",
-      "source_url": "https://youtube.com/...",
-      "text": "...",
-      "location": "São Paulo, SP"
-    }
-  ],
+  "points": [{
+    "lat": -25.4284, "lng": -49.2733,
+    "sentiment": "positivo", "sentiment_score": 0.65,
+    "detected_city_uf": "Curitiba, PR",
+    "source": "bluesky", "source_label": "Bluesky",
+    "source_url": "https://bsky.app/...", "text": "..."
+  }],
   "summary": {
-    "total": 50,
-    "sentiment_percentages": { "positivo": 40.0, "neutro": 35.0, "negativo": 25.0 },
-    "by_source": {
-      "youtube": { "count": 10, "label": "YouTube", "percentages": { "positivo": 50, "neutro": 30, "negativo": 20 } }
-    }
+    "total": 42,
+    "sentiment_percentages": { "positivo": 45.0, "neutro": 30.0, "negativo": 25.0 },
+    "by_source": { "bluesky": { "count": 20, "percentages": { ... } } }
   }
 }
 ```
 
-### `GET /api/health` — status das chaves configuradas
-
-### `GET /api/sources` — lista de fontes disponíveis
-
 ## Frontend
 
-- Filtros por fonte (checkboxes) — ative/desative YouTube, Bluesky, Reddit ou Notícias
-- Barra de percentuais de sentimento (positivo / neutro / negativo)
-- Breakdown por fonte com contagem e % de sentimento
-- Feed lateral com menções, fonte de origem e link
-- Três modos de calor: Densidade, Positivo (verde), Negativo (vermelho)
+- Filtros por fonte (YouTube / Bluesky)
+- Barra de percentuais de sentimento
+- Breakdown por fonte com % positivo/neutro/negativo
+- Feed lateral com badge da fonte e link
+- Mapa com modos: Densidade, Calor Positivo, Calor Negativo
 
 ## Licença
 
