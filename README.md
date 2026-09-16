@@ -41,24 +41,26 @@ backend/
 }
 ```
 
-## Configuração
+## Configuração rápida
 
 ```bash
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+chmod +x setup.sh && ./setup.sh
 ```
 
-### Chaves
+Guia completo passo a passo: **[SETUP.md](SETUP.md)**
 
-| Variável | Onde obter |
-|----------|-----------|
-| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com) |
-| `REDDIT_CLIENT_ID/SECRET` | [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
+### Chaves (todas gratuitas)
 
-**Funciona imediatamente sem chave:** Bluesky + Notícias RSS (fallback heurístico de sentimento).
+| Variável | Para quê | Onde obter |
+|----------|----------|-----------|
+| `GROQ_API_KEY` | Sentimento via LLM (recomendado) | [console.groq.com](https://console.groq.com) |
+| `YOUTUBE_API_KEY` | Comentários do YouTube | [Google Cloud](https://console.cloud.google.com/apis/library/youtube.googleapis.com) |
+| `REDDIT_CLIENT_ID/SECRET` | Posts do Reddit | [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) |
+
+**Sem chave:** Notícias (Google News) + Bluesky funcionam imediatamente.
+
+No dashboard, clique **"Ver dicas de configuração"** para ver o status de cada API.
 
 ## Execução
 

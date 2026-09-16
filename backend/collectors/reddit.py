@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from config import is_valid_key
+
 logger = logging.getLogger(__name__)
 
 BRAZILIAN_SUBREDDITS = ["brasil", "conversas", "desabafos", "Brasilivre", "filmes"]
@@ -21,7 +23,7 @@ def _matches(text: str, query: str) -> bool:
 async def _get_oauth_token(client: httpx.AsyncClient) -> str | None:
     client_id = os.getenv("REDDIT_CLIENT_ID")
     client_secret = os.getenv("REDDIT_CLIENT_SECRET")
-    if not client_id or not client_secret:
+    if not is_valid_key(client_id) or not is_valid_key(client_secret):
         return None
 
     try:

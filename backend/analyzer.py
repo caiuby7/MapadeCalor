@@ -159,13 +159,13 @@ def _rule_based_fallback(text: str) -> dict[str, Any]:
 
 async def analyze_text(text: str, author: str = "") -> dict[str, Any]:
     """Classifica sentimento e infere localização de um texto."""
-    if os.getenv("GROQ_API_KEY"):
+    if is_valid_key(os.getenv("GROQ_API_KEY")):
         try:
             return await _call_groq(text, author)
         except Exception as exc:
             logger.warning("Groq falhou: %s", exc)
 
-    if os.getenv("OPENAI_API_KEY"):
+    if is_valid_key(os.getenv("OPENAI_API_KEY")):
         try:
             return await _call_openai(text, author)
         except Exception as exc:

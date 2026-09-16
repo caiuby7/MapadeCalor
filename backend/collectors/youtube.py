@@ -9,6 +9,8 @@ import httpx
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from config import is_valid_key
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_VIDEOS = 5
@@ -24,7 +26,7 @@ INVIDIOUS_INSTANCES = [
 
 def _build_google_client():
     api_key = os.getenv("YOUTUBE_API_KEY")
-    if not api_key:
+    if not is_valid_key(api_key):
         return None
     return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
@@ -136,7 +138,7 @@ async def collect_youtube(
     max_videos: int = DEFAULT_MAX_VIDEOS,
     max_comments: int = DEFAULT_MAX_COMMENTS,
 ) -> list[dict[str, Any]]:
-    if os.getenv("YOUTUBE_API_KEY"):
+    if is_valid_key(os.getenv("YOUTUBE_API_KEY")):
         items = await asyncio.to_thread(_collect_google_sync, query, max_videos, max_comments)
         if items:
             logger.info("YouTube API: %d menções para '%s'", len(items), query)

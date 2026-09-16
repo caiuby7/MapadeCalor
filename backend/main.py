@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from analyzer import analyze_items, build_summary
 from collectors import AVAILABLE_SOURCES, SOURCE_META, collect_all
+from config import get_config_status
 
 load_dotenv()
 
@@ -40,20 +41,18 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 @app.get("/api/health")
 def health_check():
+    cfg = get_config_status()
     return {
         "status": "ok",
         "sources": {
-            "youtube": {"configured": bool(os.getenv("YOUTUBE_API_KEY")), **SOURCE_META["youtube"]},
+            "youtube": {"configured": cfg["youtube"], **SOURCE_META["youtube"]},
             "bluesky": {"configured": True, **SOURCE_META["bluesky"]},
-            "reddit": {
-                "configured": bool(os.getenv("REDDIT_CLIENT_ID") and os.getenv("REDDIT_CLIENT_SECRET")),
-                **SOURCE_META["reddit"],
-            },
+            "reddit": {"configured": cfg["reddit"], **SOURCE_META["reddit"]},
             "news": {"configured": True, **SOURCE_META["news"]},
         },
         "llm": {
-            "groq": bool(os.getenv("GROQ_API_KEY")),
-            "openai": bool(os.getenv("OPENAI_API_KEY")),
+            "groq": cfg["groq"],
+            "openai": cfg["openai"],
             "fallback": "rule_based",
         },
     }
@@ -66,6 +65,97 @@ def list_sources():
             {"id": src, **meta}
             for src, meta in SOURCE_META.items()
         ]
+    }
+
+
+SETUP_TIPS = [
+    {
+        "id": "groq",
+        "title": "Groq — Sentimento via LLM",
+        "configured": lambda: get_config_status()["groq"],
+        "required": False,
+        "recommended": True,
+        "env_vars": ["GROQ_API_KEY", "GROQ_MODEL"],
+        "url": "https://console.groq.com/keys",
+        "steps": [
+            "Crie conta gratuita em console.groq.com",
+            "API Keys → Create API Key",
+            "Cole GROQ_API_KEY no arquivo backend/.env",
+        ],
+    },
+    {
+        "id": "youtube",
+        "title": "YouTube Data API v3",
+        "configured": lambda: get_config_status()["youtube"],
+        "required": False,
+        "recommended": True,
+        "env_vars": ["YOUTUBE_API_KEY"],
+        "url": "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+        "steps": [
+            "Google Cloud Console → criar projeto",
+            "Ativar YouTube Data API v3",
+            "Credenciais → Chave de API",
+            "Cole YOUTUBE_API_KEY no backend/.env",
+        ],
+    },
+    {
+        "id": "reddit",
+        "title": "Reddit API",
+        "configured": lambda: get_config_status()["reddit"],
+        "required": False,
+        "recommended": False,
+        "env_vars": ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT"],
+        "url": "https://www.reddit.com/prefs/apps",
+        "steps": [
+            "reddit.com/prefs/apps → create app (tipo script)",
+            "Copie client_id e secret",
+            "Cole no backend/.env e reinicie o servidor",
+        ],
+    },
+    {
+        "id": "news",
+        "title": "Notícias (Google News + RSS)",
+        "configured": lambda: True,
+        "required": False,
+        "recommended": False,
+        "env_vars": [],
+        "url": None,
+        "steps": ["Funciona automaticamente, sem chave."],
+    },
+    {
+        "id": "bluesky",
+        "title": "Bluesky",
+        "configured": lambda: True,
+        "required": False,
+        "recommended": False,
+        "env_vars": [],
+        "url": None,
+        "steps": ["API pública gratuita, sem chave necessária."],
+    },
+]
+
+
+@app.get("/api/setup-guide")
+def setup_guide():
+    """Retorna dicas de configuração com status atual."""
+    tips = []
+    for tip in SETUP_TIPS:
+        tips.append({
+            "id": tip["id"],
+            "title": tip["title"],
+            "configured": tip["configured"](),
+            "recommended": tip["recommended"],
+            "env_vars": tip["env_vars"],
+            "url": tip["url"],
+            "steps": tip["steps"],
+        })
+    missing = [t for t in tips if not t["configured"] and t["env_vars"]]
+    return {
+        "tips": tips,
+        "ready": len(missing) == 0,
+        "missing_count": len(missing),
+        "env_file": "backend/.env",
+        "setup_doc": "/SETUP.md",
     }
 
 

@@ -41,8 +41,23 @@
     </div>
   </header>
 
+  <!-- Painel de configuração / dicas -->
+  <div id="setupPanel" class="max-w-7xl mx-auto px-4 py-3 border-b border-amber-900/40 bg-amber-950/20 hidden">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex-1">
+        <p class="text-sm font-medium text-amber-300 mb-2">⚙️ Configure as APIs para ativar todas as fontes</p>
+        <div id="setupTips" class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs"></div>
+        <p class="text-slate-500 mt-2">Arquivo: <code class="text-amber-400/80">backend/.env</code> — depois reinicie o servidor.</p>
+      </div>
+      <button id="closeSetup" class="text-slate-500 hover:text-slate-300 text-lg leading-none">×</button>
+    </div>
+  </div>
+
   <div class="max-w-7xl mx-auto px-4 py-3 border-b border-slate-800">
-    <p class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Fontes gratuitas</p>
+    <div class="flex items-center justify-between mb-2">
+      <p class="text-xs text-slate-500 uppercase tracking-wider">Fontes gratuitas</p>
+      <button id="showSetup" class="text-xs text-amber-400 hover:text-amber-300">Ver dicas de configuração</button>
+    </div>
     <div id="sourceFilters" class="flex flex-wrap gap-4">
       <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="youtube" checked class="accent-red-500 rounded" /><span class="text-red-400">YouTube</span></label>
       <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="bluesky" checked class="accent-sky-400 rounded" /><span class="text-sky-400">Bluesky</span></label>
@@ -272,7 +287,50 @@
     document.getElementById('updateBtn').addEventListener('click', () => { const q = document.getElementById('searchInput').value.trim(); if (q) fetchData(q); });
     document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const q = e.target.value.trim(); if (q) fetchData(q); } });
 
+    async function loadSetupGuide() {
+      try {
+        const res = await fetch(`${API}/api/setup-guide`);
+        const data = await res.json();
+        const panel = document.getElementById('setupPanel');
+        const tipsEl = document.getElementById('setupTips');
+
+        tipsEl.innerHTML = data.tips.map(t => {
+          const ok = t.configured;
+          const icon = ok ? '✓' : (t.recommended ? '!' : '○');
+          const color = ok ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+          const link = t.url ? `<a href="${t.url}" target="_blank" class="text-blue-400 hover:underline ml-1">obter chave ↗</a>` : '';
+          const vars = t.env_vars.length ? `<span class="text-slate-500 block mt-0.5">${t.env_vars.join(', ')}</span>` : '';
+          return `<div class="p-2 rounded border ${color}">
+            <span class="font-medium">${icon} ${t.title}</span>${link}${vars}
+            <span class="text-slate-500 block">${t.steps[0]}</span>
+          </div>`;
+        }).join('');
+
+        // Mostra painel se faltam chaves recomendadas
+        const missingRecommended = data.tips.filter(t => t.recommended && !t.configured);
+        if (missingRecommended.length > 0) panel.classList.remove('hidden');
+
+        // Badges nas fontes
+        const statusMap = { youtube: data.tips.find(t=>t.id==='youtube'), reddit: data.tips.find(t=>t.id==='reddit'), bluesky: {configured:true}, news: {configured:true} };
+        document.querySelectorAll('#sourceFilters label span').forEach(span => {
+          const src = span.parentElement.querySelector('input')?.dataset.source;
+          const st = statusMap[src];
+          if (st && !st.configured && src !== 'news' && src !== 'bluesky') {
+            span.title = 'Chave não configurada — clique em "Ver dicas"';
+          }
+        });
+      } catch (e) { console.warn('setup guide:', e); }
+    }
+
+    document.getElementById('showSetup').addEventListener('click', () => {
+      document.getElementById('setupPanel').classList.remove('hidden');
+    });
+    document.getElementById('closeSetup').addEventListener('click', () => {
+      document.getElementById('setupPanel').classList.add('hidden');
+    });
+
     initMap();
+    loadSetupGuide();
     document.getElementById('searchInput').value = 'filme rei da internet';
     fetchData('filme rei da internet');
   </script>
