@@ -17,16 +17,23 @@ async def collect_bluesky(query: str, limit: int = DEFAULT_LIMIT) -> list[dict[s
     Busca posts públicos sem autenticação.
     Retorna lista no schema unificado: source, text, author, created_at.
     """
-    params = {
-        "q": query,
-        "limit": limit,
-        "lang": "pt",
-        "sort": "latest",
+    headers = {
+        "User-Agent": "MapaDeCalor/1.0",
+        "Accept": "application/json",
     }
 
+    param_sets = [
+        {"q": query, "limit": limit, "sort": "latest"},
+        {"q": query, "limit": limit, "lang": "pt", "sort": "latest"},
+    ]
+
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.get(BSKY_SEARCH_URL, params=params)
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, headers=headers) as client:
+            response = None
+            for params in param_sets:
+                response = await client.get(BSKY_SEARCH_URL, params=params)
+                if response.status_code == 200:
+                    break
             response.raise_for_status()
             data = response.json()
     except httpx.TimeoutException:

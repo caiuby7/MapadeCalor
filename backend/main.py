@@ -96,10 +96,23 @@ async def get_heatmap_data(
     )
 
     if not items:
-        return {"points": [], "summary": build_summary([])}
+        return {
+            "points": [],
+            "summary": build_summary([]),
+            "collection": {"total_raw": 0, "by_source": {}, "message": "Nenhuma menção encontrada. Tente outro termo ou verifique as fontes."},
+        }
+
+    by_source_raw: dict[str, int] = {}
+    for item in items:
+        src = item.get("source", "unknown")
+        by_source_raw[src] = by_source_raw.get(src, 0) + 1
 
     points = await analyze_items(items)
-    return {"points": points, "summary": build_summary(points)}
+    return {
+        "points": points,
+        "summary": build_summary(points),
+        "collection": {"total_raw": len(items), "by_source": by_source_raw},
+    }
 
 
 @app.get("/")

@@ -174,7 +174,7 @@ async def analyze_text(text: str, author: str = "") -> dict[str, Any]:
     return _rule_based_fallback(text)
 
 
-async def analyze_items(items: list[dict[str, Any]], concurrency: int = 5) -> list[dict[str, Any]]:
+async def analyze_items(items: list[dict[str, Any]], concurrency: int = 8, max_items: int = 40) -> list[dict[str, Any]]:
     """Processa lista de menções e retorna pontos para o mapa de calor."""
     semaphore = asyncio.Semaphore(concurrency)
     points: list[dict[str, Any]] = []
@@ -210,7 +210,7 @@ async def analyze_items(items: list[dict[str, Any]], concurrency: int = 5) -> li
             "created_at": item.get("created_at", ""),
         }
 
-    results = await asyncio.gather(*[_process(i) for i in items])
+    results = await asyncio.gather(*[_process(i) for i in items[:max_items]])
     points.extend(r for r in results if r)
     return points
 

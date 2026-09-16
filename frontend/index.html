@@ -9,11 +9,13 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <style>
-    #map { height: calc(100vh - 300px); min-height: 350px; z-index: 0; }
+    #map { width: 100%; height: 55vh; min-height: 400px; z-index: 0; }
+    .leaflet-container { font-family: inherit; background: #0f172a; }
     .gradient-green { background: linear-gradient(90deg, #14532d, #22c55e, #bbf7d0); }
     .gradient-red { background: linear-gradient(90deg, #7f1d1d, #ef4444, #fecaca); }
     .gradient-blue { background: linear-gradient(90deg, #1e3a5f, #3b82f6, #bfdbfe); }
     .source-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 9999px; }
+    #mapEmpty { pointer-events: none; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
@@ -22,14 +24,14 @@
     <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
       <div class="flex-1">
         <h1 class="text-xl font-bold">Mapa de Calor — Menções na Web</h1>
-        <p class="text-sm text-slate-400">YouTube · Bluesky · Reddit · Notícias RSS</p>
+        <p class="text-sm text-slate-400">YouTube · Bluesky · Reddit · Notícias</p>
       </div>
       <div class="flex gap-2">
-        <input id="searchInput" type="text" value="Pablo Marçal" placeholder="Palavra-chave..."
-          class="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none text-sm w-full sm:w-64" />
+        <input id="searchInput" type="text" value="" placeholder="Ex: filme rei da internet"
+          class="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none text-sm w-full sm:w-72" />
         <button id="updateBtn"
-          class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium text-sm disabled:opacity-50 flex items-center gap-2">
-          <span id="btnText">Atualizar Mapa</span>
+          class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium text-sm disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
+          <span id="btnText">Buscar</span>
           <svg id="btnSpinner" class="hidden animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
@@ -40,29 +42,18 @@
   </header>
 
   <div class="max-w-7xl mx-auto px-4 py-3 border-b border-slate-800">
-    <p class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Fontes</p>
+    <p class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Fontes gratuitas</p>
     <div id="sourceFilters" class="flex flex-wrap gap-4">
-      <label class="flex items-center gap-2 cursor-pointer text-sm">
-        <input type="checkbox" data-source="youtube" checked class="accent-red-500 rounded" />
-        <span class="text-red-400">YouTube</span>
-      </label>
-      <label class="flex items-center gap-2 cursor-pointer text-sm">
-        <input type="checkbox" data-source="bluesky" checked class="accent-sky-400 rounded" />
-        <span class="text-sky-400">Bluesky</span>
-      </label>
-      <label class="flex items-center gap-2 cursor-pointer text-sm">
-        <input type="checkbox" data-source="reddit" checked class="accent-orange-400 rounded" />
-        <span class="text-orange-400">Reddit</span>
-      </label>
-      <label class="flex items-center gap-2 cursor-pointer text-sm">
-        <input type="checkbox" data-source="news" checked class="accent-emerald-400 rounded" />
-        <span class="text-emerald-400">Notícias RSS</span>
-      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="youtube" checked class="accent-red-500 rounded" /><span class="text-red-400">YouTube</span></label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="bluesky" checked class="accent-sky-400 rounded" /><span class="text-sky-400">Bluesky</span></label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="reddit" checked class="accent-orange-400 rounded" /><span class="text-orange-400">Reddit</span></label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm"><input type="checkbox" data-source="news" checked class="accent-emerald-400 rounded" /><span class="text-emerald-400">Notícias</span></label>
     </div>
+    <p id="collectionInfo" class="text-xs text-slate-500 mt-2"></p>
   </div>
 
   <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col lg:flex-row gap-4 items-center">
-    <div class="flex gap-2" id="modeSelector">
+    <div class="flex gap-2 flex-wrap" id="modeSelector">
       <button data-mode="density" class="mode-btn px-4 py-1.5 rounded-full text-sm border border-blue-500 bg-blue-600/20 text-blue-300">Densidade</button>
       <button data-mode="positive" class="mode-btn px-4 py-1.5 rounded-full text-sm border border-slate-700 text-slate-400">Calor Positivo</button>
       <button data-mode="negative" class="mode-btn px-4 py-1.5 rounded-full text-sm border border-slate-700 text-slate-400">Calor Negativo</button>
@@ -74,25 +65,23 @@
         <div id="barNegative" class="bg-red-500 transition-all" style="width:0%"></div>
       </div>
       <div class="text-xs whitespace-nowrap">
-        <span id="pctPositive" class="text-green-400">0%</span> positivo ·
-        <span id="pctNeutral" class="text-slate-400">0%</span> neutro ·
-        <span id="pctNegative" class="text-red-400">0%</span> negativo
+        <span id="pctPositive" class="text-green-400">0%</span> ·
+        <span id="pctNeutral" class="text-slate-400">0%</span> ·
+        <span id="pctNegative" class="text-red-400">0%</span>
       </div>
     </div>
   </div>
 
   <div id="sourceBreakdown" class="max-w-7xl mx-auto px-4 pb-2 flex flex-wrap gap-2"></div>
 
-  <div class="max-w-7xl mx-auto px-4 pb-2">
-    <div id="legendBar" class="h-2 rounded-full gradient-blue w-full max-w-xs"></div>
-    <p id="legendLabel" class="text-xs text-slate-500 mt-1">Densidade por volume de menções</p>
-  </div>
-
   <div class="max-w-7xl mx-auto px-4 pb-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <div class="lg:col-span-2">
+    <div class="lg:col-span-2 relative">
       <div id="map" class="rounded-xl overflow-hidden border border-slate-800 shadow-2xl"></div>
+      <div id="mapEmpty" class="hidden absolute inset-0 flex items-center justify-center rounded-xl bg-slate-900/80 z-10">
+        <p class="text-slate-400 text-sm text-center px-4">Nenhum ponto no mapa.<br/>Tente outro termo de busca.</p>
+      </div>
     </div>
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 max-h-[calc(100vh-300px)] overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 max-h-[55vh] overflow-y-auto">
       <h2 class="text-sm font-semibold text-slate-300 mb-2">Menções (<span id="mentionCount">0</span>)</h2>
       <div id="mentionsFeed" class="space-y-2 text-sm"></div>
     </div>
@@ -109,44 +98,75 @@
       reddit: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
       news: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
     };
+    const MARKER_COLORS = { youtube: '#ef4444', bluesky: '#38bdf8', reddit: '#f97316', news: '#34d399' };
     const GRADIENTS = {
       density: { 0.2: '#1e40af', 0.5: '#3b82f6', 0.8: '#93c5fd', 1.0: '#dbeafe' },
       positive: { 0.2: '#14532d', 0.5: '#22c55e', 0.8: '#86efac', 1.0: '#dcfce7' },
       negative: { 0.2: '#7f1d1d', 0.5: '#ef4444', 0.8: '#fca5a5', 1.0: '#fee2e2' },
     };
 
-    let map, heatLayer, allPoints = [], currentMode = 'density';
+    let map, heatLayer, markerLayer;
+    let allPoints = [], currentMode = 'density';
     let activeSources = new Set(['youtube', 'bluesky', 'reddit', 'news']);
 
     function initMap() {
-      map = L.map('map').setView(BRAZIL, 4);
+      map = L.map('map', { zoomControl: true }).setView(BRAZIL, 4);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap', maxZoom: 18,
       }).addTo(map);
+      markerLayer = L.layerGroup().addTo(map);
+      setTimeout(() => map.invalidateSize(), 200);
+      window.addEventListener('resize', () => map.invalidateSize());
     }
 
     function filtered() {
-      return allPoints.filter(p => activeSources.has(p.source));
+      return allPoints.filter(p => activeSources.has(p.source) && p.lat && p.lng);
     }
 
     function heatPoints(data, mode) {
+      if (!data.length) return [];
       if (mode === 'density') {
         const counts = {};
         data.forEach(p => { const k = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`; counts[k] = (counts[k] || 0) + 1; });
         const max = Math.max(...Object.values(counts), 1);
-        return data.map(p => { const k = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`; return [p.lat, p.lng, Math.max(0.15, counts[k] / max)]; });
+        return data.map(p => { const k = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`; return [p.lat, p.lng, Math.max(0.2, counts[k] / max)]; });
       }
       if (mode === 'positive') {
-        return data.filter(p => p.sentiment === 'positivo').map(p => [p.lat, p.lng, Math.max(0.2, (p.sentiment_score + 1) / 2)]);
+        return data.filter(p => p.sentiment === 'positivo').map(p => [p.lat, p.lng, Math.max(0.3, (p.sentiment_score + 1) / 2)]);
       }
-      return data.filter(p => p.sentiment === 'negativo').map(p => [p.lat, p.lng, Math.max(0.2, (Math.abs(p.sentiment_score) + 1) / 2)]);
+      return data.filter(p => p.sentiment === 'negativo').map(p => [p.lat, p.lng, Math.max(0.3, (Math.abs(p.sentiment_score) + 1) / 2)]);
     }
 
     function renderMap(data) {
-      if (heatLayer) map.removeLayer(heatLayer);
+      if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+      markerLayer.clearLayers();
+
+      const emptyEl = document.getElementById('mapEmpty');
+      if (!data.length) {
+        emptyEl.classList.remove('hidden');
+        map.setView(BRAZIL, 4);
+        map.invalidateSize();
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
       const pts = heatPoints(data, currentMode);
-      if (!pts.length) return;
-      heatLayer = L.heatLayer(pts, { radius: 30, blur: 20, maxZoom: 12, max: 1.0, gradient: GRADIENTS[currentMode] }).addTo(map);
+      if (pts.length) {
+        heatLayer = L.heatLayer(pts, { radius: 35, blur: 25, maxZoom: 10, max: 1.0, minOpacity: 0.4, gradient: GRADIENTS[currentMode] }).addTo(map);
+      }
+
+      // Marcadores visíveis como fallback do heatmap
+      data.forEach(p => {
+        const color = MARKER_COLORS[p.source] || '#3b82f6';
+        L.circleMarker([p.lat, p.lng], {
+          radius: 6, color, fillColor: color, fillOpacity: 0.5, weight: 1,
+        }).bindPopup(`<b>${p.source_label}</b><br/><span style="color:${color}">${p.sentiment}</span><br/>${p.text?.slice(0,120)}...`)
+          .addTo(markerLayer);
+      });
+
+      const bounds = L.latLngBounds(data.map(p => [p.lat, p.lng]));
+      if (bounds.isValid()) map.fitBounds(bounds.pad(0.3));
+      setTimeout(() => map.invalidateSize(), 100);
     }
 
     function localSummary(data) {
@@ -168,7 +188,7 @@
       return { total, sentiment_percentages, by_source };
     }
 
-    function updateUI() {
+    function updateUI(collection) {
       const data = filtered();
       const summary = localSummary(data);
       const pct = summary.sentiment_percentages;
@@ -181,27 +201,33 @@
       document.getElementById('pctNegative').textContent = `${pct.negativo || 0}%`;
       document.getElementById('mentionCount').textContent = data.length;
 
-      const breakdown = document.getElementById('sourceBreakdown');
-      breakdown.innerHTML = Object.entries(summary.by_source).map(([id, d]) => {
+      const info = document.getElementById('collectionInfo');
+      if (collection?.by_source) {
+        const parts = Object.entries(collection.by_source).map(([k, v]) => `${k}: ${v}`).join(' · ');
+        info.textContent = `Coletados: ${collection.total_raw || 0} menções (${parts})`;
+      } else if (collection?.message) {
+        info.textContent = collection.message;
+      }
+
+      document.getElementById('sourceBreakdown').innerHTML = Object.entries(summary.by_source).map(([id, d]) => {
         const cls = SOURCE_COLORS[id] || 'bg-slate-700 text-slate-300';
         const p = d.percentages;
-        return `<span class="source-badge border ${cls}">${d.label}: ${d.count} menções — ${p.positivo}% + / ${p.neutro}% ○ / ${p.negativo}% −</span>`;
+        return `<span class="source-badge border ${cls}">${d.label}: ${d.count} — ${p.positivo}%+ ${p.neutro}%○ ${p.negativo}%−</span>`;
       }).join('');
 
-      const feed = document.getElementById('mentionsFeed');
-      feed.innerHTML = data.length ? data.slice(0, 40).map(p => {
+      document.getElementById('mentionsFeed').innerHTML = data.length ? data.slice(0, 50).map(p => {
         const cls = SOURCE_COLORS[p.source] || '';
         const sentCls = p.sentiment === 'positivo' ? 'text-green-400' : p.sentiment === 'negativo' ? 'text-red-400' : 'text-slate-400';
-        const link = p.source_url ? `<a href="${p.source_url}" target="_blank" class="text-blue-400 text-xs hover:underline">abrir fonte</a>` : '';
+        const link = p.source_url ? `<a href="${p.source_url}" target="_blank" class="text-blue-400 text-xs hover:underline">abrir fonte ↗</a>` : '';
         return `<div class="p-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="source-badge border ${cls}">${p.source_label}</span>
-            <span class="${sentCls} text-xs capitalize">${p.sentiment} (${p.sentiment_score.toFixed(2)})</span>
-            <span class="text-slate-500 text-xs ml-auto">${p.detected_city_uf || ''}</span>
+            <span class="${sentCls} text-xs capitalize">${p.sentiment} (${(p.sentiment_score||0).toFixed(2)})</span>
+            <span class="text-slate-500 text-xs">${p.detected_city_uf || ''}</span>
           </div>
-          <p class="text-slate-300 text-xs line-clamp-3">${p.text}</p>${link}
+          <p class="text-slate-300 text-xs">${p.text}</p>${link}
         </div>`;
-      }).join('') : '<p class="text-slate-500 text-xs">Nenhuma menção encontrada.</p>';
+      }).join('') : '<p class="text-slate-500 text-xs">Nenhuma menção. Tente "filme rei da internet" ou outro termo.</p>';
 
       renderMap(data);
     }
@@ -214,9 +240,6 @@
           on ? (mode === 'density' ? 'border-blue-500 bg-blue-600/20 text-blue-300' : mode === 'positive' ? 'border-green-500 bg-green-600/20 text-green-300' : 'border-red-500 bg-red-600/20 text-red-300')
              : 'border-slate-700 text-slate-400');
       });
-      const bar = document.getElementById('legendBar');
-      bar.className = 'h-2 rounded-full w-full max-w-xs ' + (mode === 'positive' ? 'gradient-green' : mode === 'negative' ? 'gradient-red' : 'gradient-blue');
-      document.getElementById('legendLabel').textContent = mode === 'positive' ? 'Calor positivo' : mode === 'negative' ? 'Calor negativo' : 'Densidade por volume';
       renderMap(filtered());
     }
 
@@ -224,23 +247,23 @@
       const btn = document.getElementById('updateBtn');
       btn.disabled = true;
       document.getElementById('btnSpinner').classList.remove('hidden');
-      document.getElementById('btnText').textContent = 'Coletando...';
+      document.getElementById('btnText').textContent = 'Buscando...';
       try {
         const sources = [...document.querySelectorAll('#sourceFilters input:checked')].map(i => i.dataset.source).join(',');
         const res = await fetch(`${API}/api/heatmap-data?query=${encodeURIComponent(query)}&sources=${sources}`);
         const body = await res.json();
-        if (!res.ok) throw new Error(body.detail || 'Erro');
+        if (!res.ok) throw new Error(body.detail || 'Erro na busca');
         allPoints = body.points || [];
-        activeSources = new Set(sources.split(','));
-        updateUI();
+        activeSources = new Set(sources.split(',').filter(Boolean));
+        updateUI(body.collection);
       } catch (e) {
-        const t = document.getElementById('errorToast');
-        t.textContent = e.message; t.classList.remove('hidden');
-        setTimeout(() => t.classList.add('hidden'), 6000);
+        document.getElementById('errorToast').textContent = e.message;
+        document.getElementById('errorToast').classList.remove('hidden');
+        setTimeout(() => document.getElementById('errorToast').classList.add('hidden'), 8000);
       } finally {
         btn.disabled = false;
         document.getElementById('btnSpinner').classList.add('hidden');
-        document.getElementById('btnText').textContent = 'Atualizar Mapa';
+        document.getElementById('btnText').textContent = 'Buscar';
       }
     }
 
@@ -250,7 +273,8 @@
     document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') { const q = e.target.value.trim(); if (q) fetchData(q); } });
 
     initMap();
-    fetchData('Pablo Marçal');
+    document.getElementById('searchInput').value = 'filme rei da internet';
+    fetchData('filme rei da internet');
   </script>
 </body>
 </html>
