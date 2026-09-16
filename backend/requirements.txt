@@ -1,0 +1,7 @@
+fastapi==0.141.1
+google-api-python-client==2.200.0
+httpx==0.28.1
+openai==3.14.1
+pydantic==2.13.5
+python-dotenv==1.2.3
+uvicorn[standard]==0.53.0
