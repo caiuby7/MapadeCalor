@@ -1,124 +1,126 @@
-# Mapa de Calor — Monitoramento de Sentimentos YouTube
+# Mapa de Calor — Monitoramento de Sentimentos Multi-Fonte
 
-MVP full stack para coletar comentários públicos do YouTube, analisar sentimento e geolocalização via LLM, e visualizar os dados em um mapa de calor interativo centrado no Brasil.
+MVP full stack que coleta menções de **YouTube**, **Bluesky**, **Reddit** e **feeds RSS de notícias**, analisa sentimento e geolocalização via LLM gratuita (Groq / Hugging Face) e visualiza em mapa de calor interativo.
 
 ## Arquitetura
 
 ```
 ├── backend/
-│   ├── main.py          # Servidor FastAPI e rotas
-│   ├── collector.py     # Integração YouTube Data API v3
-│   ├── analyzer.py      # NLP / Sentimento + Geocoding via OpenAI
+│   ├── main.py              # FastAPI — rotas e CORS
+│   ├── collector.py         # Orquestrador async (asyncio.gather)
+│   ├── analyzer.py          # Sentimento + geolocalização (Groq/HF)
+│   ├── sources/
+│   │   ├── youtube.py       # YouTube Data API v3
+│   │   ├── bluesky.py       # AT Protocol (searchPosts)
+│   │   ├── reddit.py        # Reddit REST API
+│   │   └── news.py          # RSS via feedparser
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
-    └── index.html       # Dashboard com mapa Leaflet + leaflet-heat
+    └── index.html           # Leaflet + leaflet-heat + filtros
 ```
 
-## Pré-requisitos
+## Fontes de dados
 
-- Python 3.11+
-- Chave da **YouTube Data API v3** ([Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com))
-- Chave da **OpenAI API** ([platform.openai.com](https://platform.openai.com/api-keys))
+| Fonte | API | Chave necessária? | Plano |
+|-------|-----|-------------------|-------|
+| YouTube | Data API v3 | Sim (`YOUTUBE_API_KEY`) | Gratuito (cota diária) |
+| Bluesky | AT Protocol público | Não (credenciais opcionais) | Gratuito |
+| Reddit | OAuth REST | Sim (`CLIENT_ID` + `SECRET`) | Gratuito |
+| Notícias RSS | feedparser | Não | Gratuito |
 
-> Sem a chave OpenAI, o sistema usa um fallback heurístico básico (menos preciso).
+## Formato padronizado de coleta
+
+Cada fonte retorna:
+
+```json
+{
+  "source": "youtube|bluesky|reddit|news",
+  "source_label": "YouTube",
+  "source_url": "https://...",
+  "text": "...",
+  "author": "...",
+  "author_location_raw": "...",
+  "context_title": "..."
+}
+```
 
 ## Configuração
 
-1. Clone o repositório e entre na pasta do backend:
-
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate    # Windows
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-2. Copie o arquivo de ambiente e preencha as chaves:
-
-```bash
 cp .env.example .env
+# Edite .env com suas chaves
 ```
 
-Edite `.env`:
+### Chaves necessárias
 
-```env
-YOUTUBE_API_KEY=sua_chave_youtube
-OPENAI_API_KEY=sua_chave_openai
-OPENAI_MODEL=gpt-4o-mini
-```
+| Variável | Onde obter |
+|----------|-----------|
+| `YOUTUBE_API_KEY` | [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com) |
+| `REDDIT_CLIENT_ID/SECRET` | [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) (tipo "script") |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) (gratuito, Llama 3) |
+| `HUGGINGFACE_API_KEY` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `BLUESKY_HANDLE/PASSWORD` | Opcional — busca pública funciona sem |
+
+> Sem chave LLM, o sistema usa fallback heurístico. Fontes sem chave são ignoradas silenciosamente.
 
 ## Execução
 
-Inicie o servidor FastAPI (que também serve o frontend):
-
 ```bash
 cd backend
+source .venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Abra no navegador: **http://localhost:8000**
+Abra **http://localhost:8000**
 
 ## API
 
-### `GET /api/health`
+### `GET /api/heatmap-data?query={termo}&sources=youtube,bluesky,reddit,news`
 
-Verifica status e se as chaves estão configuradas.
-
-### `GET /api/heatmap-data?query={termo}`
-
-Coleta comentários do YouTube, analisa sentimento e retorna pontos para o mapa.
-
-**Parâmetros:**
-
-| Parâmetro | Tipo | Padrão | Descrição |
-|-----------|------|--------|-----------|
-| `query` | string | obrigatório | Palavra-chave de busca |
-| `max_videos` | int | 5 | Máximo de vídeos (1–10) |
-| `max_comments` | int | 20 | Comentários por vídeo (1–50) |
-
-**Resposta:**
+Coleta em paralelo, analisa e retorna:
 
 ```json
-[
-  {
-    "lat": -23.5505,
-    "lng": -46.6333,
-    "intensity": 0.8,
-    "sentiment": "positivo",
-    "sentiment_score": 0.75,
-    "location": "São Paulo, SP",
-    "text": "Comentário...",
-    "author": "Usuário",
-    "video_title": "Título do vídeo"
+{
+  "points": [
+    {
+      "lat": -23.5505,
+      "lng": -46.6333,
+      "intensity": 0.8,
+      "sentiment": "positivo",
+      "sentiment_score": 0.75,
+      "source": "youtube",
+      "source_label": "YouTube",
+      "source_url": "https://youtube.com/...",
+      "text": "...",
+      "location": "São Paulo, SP"
+    }
+  ],
+  "summary": {
+    "total": 50,
+    "sentiment_percentages": { "positivo": 40.0, "neutro": 35.0, "negativo": 25.0 },
+    "by_source": {
+      "youtube": { "count": 10, "label": "YouTube", "percentages": { "positivo": 50, "neutro": 30, "negativo": 20 } }
+    }
   }
-]
+}
 ```
+
+### `GET /api/health` — status das chaves configuradas
+
+### `GET /api/sources` — lista de fontes disponíveis
 
 ## Frontend
 
-O dashboard oferece:
-
-- Campo de busca com botão **Atualizar Mapa** e estado de carregamento
-- Três modos de visualização:
-  - **Densidade Geral** — volume total de comentários (gradiente azul)
-  - **Calor Positivo** — peso para sentimento favorável (gradiente verde)
-  - **Calor Negativo** — peso para sentimento crítico (gradiente vermelho)
-- Mapa centrado no Brasil com tiles OpenStreetMap e camada `L.heatLayer`
-
-## Como funciona a análise
-
-1. O `collector.py` busca os vídeos mais recentes com a palavra-chave e extrai comentários via `commentThreads.list`.
-2. O `analyzer.py` envia cada comentário à OpenAI com instruções para retornar JSON estruturado (sentimento + localização).
-3. Um dicionário de 27 capitais brasileiras garante coordenadas válidas quando a inferência falha.
-4. O frontend renderiza os pontos no mapa com gradientes configuráveis.
-
-## Limitações do MVP
-
-- Comentários do YouTube raramente contêm localização explícita — a geolocalização é inferida por contexto.
-- A YouTube API tem cotas diárias; ajuste `max_videos` e `max_comments` conforme necessário.
-- Vídeos com comentários desabilitados são ignorados silenciosamente.
+- Filtros por fonte (checkboxes) — ative/desative YouTube, Bluesky, Reddit ou Notícias
+- Barra de percentuais de sentimento (positivo / neutro / negativo)
+- Breakdown por fonte com contagem e % de sentimento
+- Feed lateral com menções, fonte de origem e link
+- Três modos de calor: Densidade, Positivo (verde), Negativo (vermelho)
 
 ## Licença
 

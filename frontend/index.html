@@ -3,40 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mapa de Calor — Sentimentos YouTube</title>
+  <title>Mapa de Calor — Sentimentos Multi-Fonte</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <style>
-    #map { height: calc(100vh - 180px); min-height: 400px; z-index: 0; }
+    #map { height: calc(100vh - 320px); min-height: 350px; z-index: 0; }
     .leaflet-container { font-family: inherit; }
     .gradient-green { background: linear-gradient(90deg, #14532d, #22c55e, #bbf7d0); }
     .gradient-red { background: linear-gradient(90deg, #7f1d1d, #ef4444, #fecaca); }
     .gradient-blue { background: linear-gradient(90deg, #1e3a5f, #3b82f6, #bfdbfe); }
+    .source-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 9999px; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <!-- Header -->
   <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
       <div class="flex-1">
         <h1 class="text-xl font-bold tracking-tight">Mapa de Calor — Sentimentos</h1>
-        <p class="text-sm text-slate-400">Monitoramento geográfico de comentários do YouTube</p>
+        <p class="text-sm text-slate-400">YouTube · Bluesky · Reddit · Notícias RSS</p>
       </div>
       <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <input
-          id="searchInput"
-          type="text"
-          value="Pablo Marçal"
-          placeholder="Palavra-chave..."
-          class="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none text-sm w-full sm:w-64"
-        />
-        <button
-          id="updateBtn"
-          class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
+        <input id="searchInput" type="text" value="Pablo Marçal" placeholder="Palavra-chave..."
+          class="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 focus:border-blue-500 focus:outline-none text-sm w-full sm:w-64" />
+        <button id="updateBtn"
+          class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
           <span id="btnText">Atualizar Mapa</span>
           <svg id="btnSpinner" class="hidden animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -47,39 +40,74 @@
     </div>
   </header>
 
-  <!-- Controls -->
-  <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
-    <div class="flex flex-wrap gap-2" id="modeSelector">
-      <button data-mode="density" class="mode-btn active px-4 py-1.5 rounded-full text-sm font-medium border border-blue-500 bg-blue-600/20 text-blue-300">
-        Densidade Geral
-      </button>
-      <button data-mode="positive" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-green-500 hover:text-green-300">
-        Calor Positivo
-      </button>
-      <button data-mode="negative" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-red-500 hover:text-red-300">
-        Calor Negativo
-      </button>
-    </div>
-    <div id="stats" class="text-sm text-slate-400 flex gap-4">
-      <span id="statTotal">0 comentários</span>
-      <span id="statPositive" class="text-green-400">0 positivos</span>
-      <span id="statNegative" class="text-red-400">0 negativos</span>
-      <span id="statNeutral" class="text-slate-500">0 neutros</span>
+  <!-- Source filters -->
+  <div class="max-w-7xl mx-auto px-4 py-3 border-b border-slate-800">
+    <p class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Fontes de dados</p>
+    <div id="sourceFilters" class="flex flex-wrap gap-3">
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="youtube" checked class="accent-red-500 rounded" />
+        <span class="text-red-400">YouTube</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="bluesky" checked class="accent-sky-400 rounded" />
+        <span class="text-sky-400">Bluesky</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="reddit" checked class="accent-orange-400 rounded" />
+        <span class="text-orange-400">Reddit</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="news" checked class="accent-emerald-400 rounded" />
+        <span class="text-emerald-400">Notícias RSS</span>
+      </label>
     </div>
   </div>
 
-  <!-- Gradient legend -->
+  <!-- Mode + Stats -->
+  <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col lg:flex-row gap-4">
+    <div class="flex flex-wrap gap-2" id="modeSelector">
+      <button data-mode="density" class="mode-btn active px-4 py-1.5 rounded-full text-sm font-medium border border-blue-500 bg-blue-600/20 text-blue-300">Densidade Geral</button>
+      <button data-mode="positive" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-green-500 hover:text-green-300">Calor Positivo</button>
+      <button data-mode="negative" class="mode-btn px-4 py-1.5 rounded-full text-sm font-medium border border-slate-700 text-slate-400 hover:border-red-500 hover:text-red-300">Calor Negativo</button>
+    </div>
+
+    <!-- Sentiment percentages -->
+    <div id="sentimentBar" class="flex-1 flex items-center gap-2 min-w-[200px]">
+      <div class="flex-1 h-3 rounded-full overflow-hidden flex bg-slate-800">
+        <div id="barPositive" class="bg-green-500 transition-all" style="width:0%"></div>
+        <div id="barNeutral" class="bg-slate-500 transition-all" style="width:0%"></div>
+        <div id="barNegative" class="bg-red-500 transition-all" style="width:0%"></div>
+      </div>
+      <div class="text-xs whitespace-nowrap">
+        <span id="pctPositive" class="text-green-400">0%</span> ·
+        <span id="pctNeutral" class="text-slate-400">0%</span> ·
+        <span id="pctNegative" class="text-red-400">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Source breakdown -->
+  <div id="sourceBreakdown" class="max-w-7xl mx-auto px-4 pb-2 flex flex-wrap gap-2"></div>
+
+  <!-- Legend -->
   <div class="max-w-7xl mx-auto px-4 pb-2">
     <div id="legendBar" class="h-2 rounded-full gradient-blue w-full max-w-xs"></div>
-    <p id="legendLabel" class="text-xs text-slate-500 mt-1">Intensidade por volume de comentários</p>
+    <p id="legendLabel" class="text-xs text-slate-500 mt-1">Intensidade por volume de menções</p>
   </div>
 
-  <!-- Map -->
-  <div class="max-w-7xl mx-auto px-4 pb-4">
-    <div id="map" class="rounded-xl overflow-hidden border border-slate-800 shadow-2xl"></div>
+  <!-- Map + Feed -->
+  <div class="max-w-7xl mx-auto px-4 pb-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2">
+      <div id="map" class="rounded-xl overflow-hidden border border-slate-800 shadow-2xl"></div>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 max-h-[calc(100vh-320px)] overflow-y-auto">
+      <h2 class="text-sm font-semibold text-slate-300 mb-2">Menções recentes</h2>
+      <div id="mentionsFeed" class="space-y-2 text-sm">
+        <p class="text-slate-500 text-xs">Carregando...</p>
+      </div>
+    </div>
   </div>
 
-  <!-- Error toast -->
   <div id="errorToast" class="hidden fixed bottom-6 right-6 max-w-sm bg-red-900/90 border border-red-700 text-red-100 px-4 py-3 rounded-lg shadow-lg z-50 text-sm"></div>
 
   <script>
@@ -87,9 +115,23 @@
     const BRAZIL_CENTER = [-14.2350, -51.9253];
     const BRAZIL_ZOOM = 4;
 
+    const SOURCE_COLORS = {
+      youtube: 'bg-red-500/20 text-red-300 border-red-500/30',
+      bluesky: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+      reddit: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+      news: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    };
+
+    const SENTIMENT_COLORS = {
+      positivo: 'text-green-400',
+      neutro: 'text-slate-400',
+      negativo: 'text-red-400',
+    };
+
     let map, heatLayer;
-    let rawData = [];
+    let allPoints = [];
     let currentMode = 'density';
+    let activeSources = new Set(['youtube', 'bluesky', 'reddit', 'news']);
 
     const GRADIENTS = {
       density: { 0.2: '#1e40af', 0.5: '#3b82f6', 0.8: '#93c5fd', 1.0: '#dbeafe' },
@@ -97,123 +139,181 @@
       negative: { 0.2: '#7f1d1d', 0.5: '#ef4444', 0.8: '#fca5a5', 1.0: '#fee2e2' },
     };
 
+    function getFilteredData() {
+      return allPoints.filter(p => activeSources.has(p.source));
+    }
+
     function initMap() {
       map = L.map('map').setView(BRAZIL_CENTER, BRAZIL_ZOOM);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        attribution: '&copy; OpenStreetMap',
         maxZoom: 18,
       }).addTo(map);
     }
 
     function computeHeatPoints(data, mode) {
       if (mode === 'density') {
-        const locationCounts = {};
+        const counts = {};
         data.forEach(p => {
-          const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
-          locationCounts[key] = (locationCounts[key] || 0) + 1;
+          const k = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+          counts[k] = (counts[k] || 0) + 1;
         });
-        const maxCount = Math.max(...Object.values(locationCounts), 1);
-
+        const max = Math.max(...Object.values(counts), 1);
         return data.map(p => {
-          const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
-          const intensity = locationCounts[key] / maxCount;
-          return [p.lat, p.lng, Math.max(0.15, intensity)];
+          const k = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+          return [p.lat, p.lng, Math.max(0.15, counts[k] / max)];
         });
       }
-
       if (mode === 'positive') {
-        return data
-          .filter(p => p.sentiment === 'positivo' || p.sentiment_score > 0)
+        return data.filter(p => p.sentiment === 'positivo' || p.sentiment_score > 0)
           .map(p => [p.lat, p.lng, Math.max(0.2, (p.sentiment_score + 1) / 2)]);
       }
-
-      return data
-        .filter(p => p.sentiment === 'negativo' || p.sentiment_score < 0)
+      return data.filter(p => p.sentiment === 'negativo' || p.sentiment_score < 0)
         .map(p => [p.lat, p.lng, Math.max(0.2, (Math.abs(p.sentiment_score) + 1) / 2)]);
     }
 
     function renderHeatmap(data, mode) {
-      if (heatLayer) {
-        map.removeLayer(heatLayer);
-      }
-
+      if (heatLayer) map.removeLayer(heatLayer);
       const points = computeHeatPoints(data, mode);
-      if (points.length === 0) {
-        return;
-      }
-
+      if (points.length === 0) return;
       heatLayer = L.heatLayer(points, {
-        radius: 30,
-        blur: 20,
-        maxZoom: 12,
-        max: 1.0,
-        gradient: GRADIENTS[mode],
+        radius: 30, blur: 20, maxZoom: 12, max: 1.0, gradient: GRADIENTS[mode],
       }).addTo(map);
     }
 
-    function updateStats(data) {
-      const total = data.length;
-      const positive = data.filter(p => p.sentiment === 'positivo').length;
-      const negative = data.filter(p => p.sentiment === 'negativo').length;
-      const neutral = total - positive - negative;
+    function updateSentimentBar(summary) {
+      const pct = summary.sentiment_percentages || {};
+      const pos = pct.positivo || 0;
+      const neu = pct.neutro || 0;
+      const neg = pct.negativo || 0;
 
-      document.getElementById('statTotal').textContent = `${total} comentários`;
-      document.getElementById('statPositive').textContent = `${positive} positivos`;
-      document.getElementById('statNegative').textContent = `${negative} negativos`;
-      document.getElementById('statNeutral').textContent = `${neutral} neutros`;
+      document.getElementById('barPositive').style.width = `${pos}%`;
+      document.getElementById('barNeutral').style.width = `${neu}%`;
+      document.getElementById('barNegative').style.width = `${neg}%`;
+      document.getElementById('pctPositive').textContent = `${pos}%`;
+      document.getElementById('pctNeutral').textContent = `${neu}%`;
+      document.getElementById('pctNegative').textContent = `${neg}%`;
+    }
+
+    function updateSourceBreakdown(summary) {
+      const container = document.getElementById('sourceBreakdown');
+      const bySource = summary.by_source || {};
+      container.innerHTML = '';
+
+      Object.entries(bySource).forEach(([id, data]) => {
+        const pct = data.percentages || {};
+        const badge = SOURCE_COLORS[id] || 'bg-slate-700 text-slate-300';
+        const el = document.createElement('div');
+        el.className = `source-badge border ${badge} flex items-center gap-1`;
+        el.innerHTML = `<strong>${data.label}</strong> ${data.count} ·
+          <span class="text-green-400">${pct.positivo || 0}%</span>/
+          <span class="text-slate-400">${pct.neutro || 0}%</span>/
+          <span class="text-red-400">${pct.negativo || 0}%</span>`;
+        container.appendChild(el);
+      });
+    }
+
+    function updateMentionsFeed(data) {
+      const feed = document.getElementById('mentionsFeed');
+      if (data.length === 0) {
+        feed.innerHTML = '<p class="text-slate-500 text-xs">Nenhuma menção encontrada.</p>';
+        return;
+      }
+
+      feed.innerHTML = data.slice(0, 30).map(p => {
+        const srcClass = SOURCE_COLORS[p.source] || 'bg-slate-700 text-slate-300';
+        const sentClass = SENTIMENT_COLORS[p.sentiment] || 'text-slate-400';
+        const url = p.source_url ? `<a href="${p.source_url}" target="_blank" class="text-blue-400 hover:underline text-xs">ver fonte</a>` : '';
+        return `<div class="p-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="source-badge border ${srcClass}">${p.source_label || p.source}</span>
+            <span class="${sentClass} text-xs capitalize">${p.sentiment} (${(p.sentiment_score || 0).toFixed(2)})</span>
+            <span class="text-slate-500 text-xs ml-auto">${p.location || ''}</span>
+          </div>
+          <p class="text-slate-300 text-xs line-clamp-3">${p.text}</p>
+          ${url}
+        </div>`;
+      }).join('');
     }
 
     function updateLegend(mode) {
       const bar = document.getElementById('legendBar');
       const label = document.getElementById('legendLabel');
       bar.className = 'h-2 rounded-full w-full max-w-xs';
+      if (mode === 'positive') { bar.classList.add('gradient-green'); label.textContent = 'Calor positivo'; }
+      else if (mode === 'negative') { bar.classList.add('gradient-red'); label.textContent = 'Calor negativo'; }
+      else { bar.classList.add('gradient-blue'); label.textContent = 'Densidade por volume'; }
+    }
 
-      if (mode === 'positive') {
-        bar.classList.add('gradient-green');
-        label.textContent = 'Intensidade de sentimento positivo';
-      } else if (mode === 'negative') {
-        bar.classList.add('gradient-red');
-        label.textContent = 'Intensidade de sentimento negativo';
-      } else {
-        bar.classList.add('gradient-blue');
-        label.textContent = 'Intensidade por volume de comentários';
-      }
+    function refreshView() {
+      const filtered = getFilteredData();
+      const summary = buildLocalSummary(filtered);
+      updateSentimentBar(summary);
+      updateSourceBreakdown(summary);
+      updateMentionsFeed(filtered);
+      renderHeatmap(filtered, currentMode);
+    }
+
+    function buildLocalSummary(data) {
+      const total = data.length;
+      if (total === 0) return { total: 0, sentiment_percentages: { positivo: 0, neutro: 0, negativo: 0 }, by_source: {} };
+
+      const counts = { positivo: 0, neutro: 0, negativo: 0 };
+      const bySource = {};
+
+      data.forEach(p => {
+        counts[p.sentiment] = (counts[p.sentiment] || 0) + 1;
+        const src = p.source;
+        if (!bySource[src]) bySource[src] = { count: 0, label: p.source_label, positivo: 0, neutro: 0, negativo: 0 };
+        bySource[src].count++;
+        bySource[src][p.sentiment]++;
+      });
+
+      const sentiment_percentages = {};
+      Object.keys(counts).forEach(k => { sentiment_percentages[k] = Math.round(counts[k] / total * 1000) / 10; });
+
+      Object.values(bySource).forEach(s => {
+        s.percentages = {
+          positivo: Math.round(s.positivo / s.count * 1000) / 10,
+          neutro: Math.round(s.neutro / s.count * 1000) / 10,
+          negativo: Math.round(s.negativo / s.count * 1000) / 10,
+        };
+      });
+
+      return { total, sentiment_percentages, by_source: bySource };
     }
 
     function setLoading(loading) {
-      const btn = document.getElementById('updateBtn');
-      const spinner = document.getElementById('btnSpinner');
-      const text = document.getElementById('btnText');
-      btn.disabled = loading;
-      spinner.classList.toggle('hidden', !loading);
-      text.textContent = loading ? 'Carregando...' : 'Atualizar Mapa';
+      document.getElementById('updateBtn').disabled = loading;
+      document.getElementById('btnSpinner').classList.toggle('hidden', !loading);
+      document.getElementById('btnText').textContent = loading ? 'Coletando...' : 'Atualizar Mapa';
     }
 
-    function showError(message) {
-      const toast = document.getElementById('errorToast');
-      toast.textContent = message;
-      toast.classList.remove('hidden');
-      setTimeout(() => toast.classList.add('hidden'), 6000);
+    function showError(msg) {
+      const t = document.getElementById('errorToast');
+      t.textContent = msg;
+      t.classList.remove('hidden');
+      setTimeout(() => t.classList.add('hidden'), 8000);
+    }
+
+    function getSelectedSources() {
+      return [...document.querySelectorAll('#sourceFilters input:checked')].map(i => i.dataset.source);
     }
 
     async function fetchHeatmapData(query) {
       setLoading(true);
       try {
-        const url = `${API_BASE}/api/heatmap-data?query=${encodeURIComponent(query)}`;
+        const sources = getSelectedSources().join(',');
+        const url = `${API_BASE}/api/heatmap-data?query=${encodeURIComponent(query)}&sources=${sources}`;
         const res = await fetch(url);
         const body = await res.json();
+        if (!res.ok) throw new Error(body.detail || 'Erro desconhecido');
 
-        if (!res.ok) {
-          const detail = body.detail || 'Erro desconhecido';
-          throw new Error(detail);
-        }
-
-        rawData = body;
-        updateStats(rawData);
-        renderHeatmap(rawData, currentMode);
+        allPoints = body.points || [];
+        activeSources = new Set(getSelectedSources());
+        refreshView();
       } catch (err) {
         showError(err.message || 'Falha ao carregar dados');
-        console.error(err);
       } finally {
         setLoading(false);
       }
@@ -222,23 +322,16 @@
     function setMode(mode) {
       currentMode = mode;
       document.querySelectorAll('.mode-btn').forEach(btn => {
-        const isActive = btn.dataset.mode === mode;
-        btn.classList.toggle('active', isActive);
-        btn.classList.toggle('border-blue-500', isActive && mode === 'density');
-        btn.classList.toggle('bg-blue-600/20', isActive && mode === 'density');
-        btn.classList.toggle('text-blue-300', isActive && mode === 'density');
-        btn.classList.toggle('border-green-500', isActive && mode === 'positive');
-        btn.classList.toggle('bg-green-600/20', isActive && mode === 'positive');
-        btn.classList.toggle('text-green-300', isActive && mode === 'positive');
-        btn.classList.toggle('border-red-500', isActive && mode === 'negative');
-        btn.classList.toggle('bg-red-600/20', isActive && mode === 'negative');
-        btn.classList.toggle('text-red-300', isActive && mode === 'negative');
-        if (!isActive) {
-          btn.classList.add('border-slate-700', 'text-slate-400');
-        }
+        const active = btn.dataset.mode === mode;
+        btn.className = 'mode-btn px-4 py-1.5 rounded-full text-sm font-medium border ' +
+          (active
+            ? (mode === 'density' ? 'border-blue-500 bg-blue-600/20 text-blue-300'
+              : mode === 'positive' ? 'border-green-500 bg-green-600/20 text-green-300'
+              : 'border-red-500 bg-red-600/20 text-red-300')
+            : 'border-slate-700 text-slate-400');
       });
       updateLegend(mode);
-      renderHeatmap(rawData, currentMode);
+      renderHeatmap(getFilteredData(), currentMode);
     }
 
     document.getElementById('modeSelector').addEventListener('click', e => {
@@ -246,15 +339,20 @@
       if (btn) setMode(btn.dataset.mode);
     });
 
+    document.getElementById('sourceFilters').addEventListener('change', () => {
+      activeSources = new Set(getSelectedSources());
+      refreshView();
+    });
+
     document.getElementById('updateBtn').addEventListener('click', () => {
-      const query = document.getElementById('searchInput').value.trim();
-      if (query) fetchHeatmapData(query);
+      const q = document.getElementById('searchInput').value.trim();
+      if (q) fetchHeatmapData(q);
     });
 
     document.getElementById('searchInput').addEventListener('keydown', e => {
       if (e.key === 'Enter') {
-        const query = e.target.value.trim();
-        if (query) fetchHeatmapData(query);
+        const q = e.target.value.trim();
+        if (q) fetchHeatmapData(q);
       }
     });
 

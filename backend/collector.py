@@ -1,136 +1,88 @@
-"""Coleta de comentários públicos do YouTube via Data API v3."""
+"""Orquestrador de coleta multi-fonte em paralelo."""
 
+import asyncio
 import logging
-import os
 from typing import Any
 
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from sources.bluesky import collect_bluesky
+from sources.news import collect_news
+from sources.reddit import collect_reddit
+from sources.youtube import collect_youtube
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_VIDEOS = 5
-DEFAULT_MAX_COMMENTS_PER_VIDEO = 20
+# Formato padronizado de cada item coletado:
+# {
+#   "source": "youtube|bluesky|reddit|news",
+#   "source_label": "YouTube",
+#   "source_url": "https://...",
+#   "text": "...",
+#   "author": "...",
+#   "author_location_raw": "...",
+#   "published_at": "...",
+#   "context_title": "...",
+# }
+
+AVAILABLE_SOURCES = ("youtube", "bluesky", "reddit", "news")
+
+_SOURCE_COLLECTORS = {
+    "youtube": collect_youtube,
+    "bluesky": collect_bluesky,
+    "reddit": collect_reddit,
+    "news": collect_news,
+}
 
 
-class YouTubeCollectorError(Exception):
-    """Erro na coleta de dados do YouTube."""
-
-
-def _get_youtube_client():
-    api_key = os.getenv("YOUTUBE_API_KEY")
-    if not api_key:
-        raise YouTubeCollectorError(
-            "YOUTUBE_API_KEY não configurada. Defina a variável no arquivo .env"
-        )
-    return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
-
-
-def search_videos(
-    query: str,
-    max_results: int = DEFAULT_MAX_VIDEOS,
-) -> list[dict[str, Any]]:
-    """Busca os vídeos mais recentes relacionados à palavra-chave."""
-    youtube = _get_youtube_client()
-
+async def _safe_collect(name: str, coro) -> list[dict[str, Any]]:
+    """Executa um coletor isolando falhas para não derrubar as demais fontes."""
     try:
-        response = (
-            youtube.search()
-            .list(
-                part="snippet",
-                q=query,
-                type="video",
-                order="date",
-                maxResults=max_results,
-                relevanceLanguage="pt",
-                regionCode="BR",
-            )
-            .execute()
-        )
-    except HttpError as exc:
-        logger.exception("Falha ao buscar vídeos no YouTube")
-        raise YouTubeCollectorError(f"Erro na busca de vídeos: {exc.reason}") from exc
-
-    videos: list[dict[str, Any]] = []
-    for item in response.get("items", []):
-        video_id = item["id"]["videoId"]
-        snippet = item["snippet"]
-        videos.append(
-            {
-                "video_id": video_id,
-                "title": snippet.get("title", ""),
-                "channel_title": snippet.get("channelTitle", ""),
-                "published_at": snippet.get("publishedAt", ""),
-            }
-        )
-    return videos
-
-
-def fetch_comments(
-    video_id: str,
-    max_results: int = DEFAULT_MAX_COMMENTS_PER_VIDEO,
-) -> list[dict[str, Any]]:
-    """Extrai comentários de um vídeo via commentThreads.list."""
-    youtube = _get_youtube_client()
-    comments: list[dict[str, Any]] = []
-
-    try:
-        response = (
-            youtube.commentThreads()
-            .list(
-                part="snippet",
-                videoId=video_id,
-                order="time",
-                maxResults=max_results,
-                textFormat="plainText",
-            )
-            .execute()
-        )
-    except HttpError as exc:
-        if exc.resp.status == 403:
-            logger.warning("Comentários desabilitados ou indisponíveis para %s", video_id)
-            return []
-        logger.exception("Falha ao buscar comentários do vídeo %s", video_id)
-        raise YouTubeCollectorError(f"Erro ao buscar comentários: {exc.reason}") from exc
-
-    for item in response.get("items", []):
-        snippet = item["snippet"]["topLevelComment"]["snippet"]
-        comments.append(
-            {
-                "comment_id": item["id"],
-                "video_id": video_id,
-                "text": snippet.get("textDisplay", ""),
-                "author": snippet.get("authorDisplayName", ""),
-                "published_at": snippet.get("publishedAt", ""),
-                "like_count": snippet.get("likeCount", 0),
-            }
-        )
-    return comments
-
-
-def collect_comments_for_query(
-    query: str,
-    max_videos: int = DEFAULT_MAX_VIDEOS,
-    max_comments_per_video: int = DEFAULT_MAX_COMMENTS_PER_VIDEO,
-) -> list[dict[str, Any]]:
-    """Pipeline completo: busca vídeos e agrega comentários."""
-    videos = search_videos(query, max_results=max_videos)
-    if not videos:
-        logger.warning("Nenhum vídeo encontrado para a query: %s", query)
+        result = await coro
+        return result
+    except Exception as exc:
+        logger.error("Coletor %s falhou: %s", name, exc)
         return []
 
-    all_comments: list[dict[str, Any]] = []
-    for video in videos:
-        comments = fetch_comments(video["video_id"], max_results=max_comments_per_video)
-        for comment in comments:
-            comment["video_title"] = video["title"]
-            comment["channel_title"] = video["channel_title"]
-        all_comments.extend(comments)
 
-    logger.info(
-        "Coletados %d comentários de %d vídeos para '%s'",
-        len(all_comments),
-        len(videos),
-        query,
-    )
-    return all_comments
+async def collect_all(
+    query: str,
+    sources: list[str] | None = None,
+    max_videos: int = 5,
+    max_comments: int = 15,
+) -> list[dict[str, Any]]:
+    """
+    Coleta menções de múltiplas fontes em paralelo via asyncio.gather.
+    Retorna lista unificada no formato padronizado.
+    """
+    active = sources or list(AVAILABLE_SOURCES)
+    active = [s for s in active if s in _SOURCE_COLLECTORS]
+
+    if not active:
+        logger.warning("Nenhuma fonte válida selecionada")
+        return []
+
+    tasks = []
+    for source in active:
+        if source == "youtube":
+            tasks.append(_safe_collect(source, collect_youtube(query, max_videos, max_comments)))
+        else:
+            tasks.append(_safe_collect(source, _SOURCE_COLLECTORS[source](query)))
+
+    results = await asyncio.gather(*tasks)
+
+    all_items: list[dict[str, Any]] = []
+    for source, items in zip(active, results):
+        logger.info("Fonte %s: %d itens", source, len(items))
+        all_items.extend(items)
+
+    logger.info("Total coletado: %d menções de %d fontes para '%s'", len(all_items), len(active), query)
+    return all_items
+
+
+def collect_all_sync(
+    query: str,
+    sources: list[str] | None = None,
+    max_videos: int = 5,
+    max_comments: int = 15,
+) -> list[dict[str, Any]]:
+    """Wrapper síncrono para uso em contextos sem event loop."""
+    return asyncio.run(collect_all(query, sources, max_videos, max_comments))
