@@ -188,7 +188,12 @@ async def analyze_items(items: list[dict[str, Any]], concurrency: int = 5) -> li
             analysis = await analyze_text(text, item.get("author", ""))
 
         source = item.get("source", "unknown")
-        source_labels = {"youtube": "YouTube", "bluesky": "Bluesky"}
+        default_labels = {
+            "youtube": "YouTube",
+            "bluesky": "Bluesky",
+            "reddit": "Reddit",
+            "news": "Notícias",
+        }
 
         return {
             "lat": analysis["lat"],
@@ -200,7 +205,7 @@ async def analyze_items(items: list[dict[str, Any]], concurrency: int = 5) -> li
             "text": text[:300],
             "author": item.get("author", ""),
             "source": source,
-            "source_label": source_labels.get(source, source),
+            "source_label": item.get("source_label") or default_labels.get(source, source),
             "source_url": item.get("source_url", ""),
             "created_at": item.get("created_at", ""),
         }

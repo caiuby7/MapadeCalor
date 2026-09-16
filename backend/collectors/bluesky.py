@@ -69,6 +69,7 @@ async def collect_bluesky(query: str, limit: int = DEFAULT_LIMIT) -> list[dict[s
                 "author": display_name,
                 "created_at": record.get("createdAt", ""),
                 "source_url": source_url,
+                "source_label": "Bluesky",
             }
         )
 

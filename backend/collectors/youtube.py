@@ -80,6 +80,7 @@ def _collect_sync(query: str, max_videos: int, max_comments: int) -> list[dict[s
                     "author": snippet.get("authorDisplayName", ""),
                     "created_at": snippet.get("publishedAt", ""),
                     "source_url": f"https://www.youtube.com/watch?v={video_id}",
+                    "source_label": "YouTube",
                 }
             )
 

@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from analyzer import analyze_items, build_summary
-from collectors import AVAILABLE_SOURCES, collect_all
+from collectors import AVAILABLE_SOURCES, SOURCE_META, collect_all
 
 load_dotenv()
 
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Mapa de Calor — Menções na Web",
-    description="Coleta menções do YouTube e Bluesky, classifica sentimento e plota no mapa.",
-    version="1.0.0",
+    description="Coleta menções de APIs gratuitas, classifica sentimento e plota no mapa.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -43,8 +43,13 @@ def health_check():
     return {
         "status": "ok",
         "sources": {
-            "youtube": bool(os.getenv("YOUTUBE_API_KEY")),
-            "bluesky": True,
+            "youtube": {"configured": bool(os.getenv("YOUTUBE_API_KEY")), **SOURCE_META["youtube"]},
+            "bluesky": {"configured": True, **SOURCE_META["bluesky"]},
+            "reddit": {
+                "configured": bool(os.getenv("REDDIT_CLIENT_ID") and os.getenv("REDDIT_CLIENT_SECRET")),
+                **SOURCE_META["reddit"],
+            },
+            "news": {"configured": True, **SOURCE_META["news"]},
         },
         "llm": {
             "groq": bool(os.getenv("GROQ_API_KEY")),
@@ -54,14 +59,27 @@ def health_check():
     }
 
 
+@app.get("/api/sources")
+def list_sources():
+    return {
+        "sources": [
+            {"id": src, **meta}
+            for src, meta in SOURCE_META.items()
+        ]
+    }
+
+
 @app.get("/api/heatmap-data")
 async def get_heatmap_data(
     query: str = Query(..., min_length=1, description="Palavra-chave de busca"),
-    sources: str = Query("youtube,bluesky", description="Fontes: youtube,bluesky"),
+    sources: str = Query(
+        "youtube,bluesky,reddit,news",
+        description="Fontes: youtube,bluesky,reddit,news",
+    ),
     max_videos: int = Query(5, ge=1, le=10),
     max_comments: int = Query(20, ge=1, le=50),
 ):
-    """Coleta menções em paralelo, analisa sentimento e retorna pontos + resumo."""
+    """Coleta menções em paralelo de todas as APIs gratuitas, analisa e retorna pontos."""
     source_list = [s.strip() for s in sources.split(",") if s.strip()]
     invalid = [s for s in source_list if s not in AVAILABLE_SOURCES]
     if invalid:

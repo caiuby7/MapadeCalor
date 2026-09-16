@@ -22,7 +22,7 @@
     <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
       <div class="flex-1">
         <h1 class="text-xl font-bold">Mapa de Calor — Menções na Web</h1>
-        <p class="text-sm text-slate-400">YouTube · Bluesky · Sentimento geográfico</p>
+        <p class="text-sm text-slate-400">YouTube · Bluesky · Reddit · Notícias RSS</p>
       </div>
       <div class="flex gap-2">
         <input id="searchInput" type="text" value="Pablo Marçal" placeholder="Palavra-chave..."
@@ -41,7 +41,7 @@
 
   <div class="max-w-7xl mx-auto px-4 py-3 border-b border-slate-800">
     <p class="text-xs text-slate-500 mb-2 uppercase tracking-wider">Fontes</p>
-    <div id="sourceFilters" class="flex gap-4">
+    <div id="sourceFilters" class="flex flex-wrap gap-4">
       <label class="flex items-center gap-2 cursor-pointer text-sm">
         <input type="checkbox" data-source="youtube" checked class="accent-red-500 rounded" />
         <span class="text-red-400">YouTube</span>
@@ -49,6 +49,14 @@
       <label class="flex items-center gap-2 cursor-pointer text-sm">
         <input type="checkbox" data-source="bluesky" checked class="accent-sky-400 rounded" />
         <span class="text-sky-400">Bluesky</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="reddit" checked class="accent-orange-400 rounded" />
+        <span class="text-orange-400">Reddit</span>
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" data-source="news" checked class="accent-emerald-400 rounded" />
+        <span class="text-emerald-400">Notícias RSS</span>
       </label>
     </div>
   </div>
@@ -98,6 +106,8 @@
     const SOURCE_COLORS = {
       youtube: 'bg-red-500/20 text-red-300 border-red-500/30',
       bluesky: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+      reddit: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+      news: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
     };
     const GRADIENTS = {
       density: { 0.2: '#1e40af', 0.5: '#3b82f6', 0.8: '#93c5fd', 1.0: '#dbeafe' },
@@ -106,7 +116,7 @@
     };
 
     let map, heatLayer, allPoints = [], currentMode = 'density';
-    let activeSources = new Set(['youtube', 'bluesky']);
+    let activeSources = new Set(['youtube', 'bluesky', 'reddit', 'news']);
 
     function initMap() {
       map = L.map('map').setView(BRAZIL, 4);
